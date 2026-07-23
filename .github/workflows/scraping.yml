@@ -1,0 +1,87 @@
+name: Scraping quotidien AutoDeal Tunisie
+
+# Le cron GitHub est TOUJOURS en UTC. La Tunisie est a UTC+1 toute l'annee
+# (pas de changement d'heure) : minuit heure tunisienne = 23h00 UTC la veille.
+"on":
+  schedule:
+    - cron: "0 23 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+# Un scraping complet peut durer plusieurs heures. Sans ce garde-fou, un run
+# lent et le run du lendemain pourraient tourner en parallele et se pousser
+# des commits contradictoires sur les memes fichiers de donnees.
+concurrency:
+  group: scraping-quotidien
+  cancel-in-progress: false
+
+jobs:
+  scraping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+
+    steps:
+      - name: Recuperer le depot
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Installer les dependances Python
+        run: pip install -r requirements.txt
+
+      - name: Installer les navigateurs (Playwright + Patchright)
+        run: |
+          python -m playwright install --with-deps chromium
+          python -m patchright install chromium
+
+      - name: Installer un ecran virtuel (scraper_automobile.py tourne en mode non headless)
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Lancer le pipeline complet (scrapers -> nettoyage -> modele -> deals)
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: xvfb-run --auto-servernum python main.py
+
+      - name: Verifier que le pipeline a bien produit des donnees
+        # Sans ce controle, un pipeline qui echoue a mi-chemin laisse les
+        # anciens fichiers en place : le commit suivant ne montre aucun
+        # changement et tout parait normal, alors que plus rien n'est a jour.
+        run: |
+          set -e
+          for f in data/processed/tunisia-cars-scored.csv data/models/modele_prix.pkl; do
+            test -s "$f" || { echo "Fichier attendu manquant ou vide : $f"; exit 1; }
+          done
+          python -c "import pandas as pd, sys; d=pd.read_csv('data/processed/tunisia-cars-scored.csv', sep=';', encoding='utf-8-sig'); print(f'{len(d)} annonces scorees'); sys.exit(0 if len(d)>100 else 1)"
+
+      - name: Envoyer les alertes Telegram
+        # Telegram est une notification, pas le coeur du pipeline : son echec ne
+        # doit jamais empecher l'enregistrement des donnees deja scrapees.
+        continue-on-error: true
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python utils/send_telegram.py
+
+      - name: Enregistrer les nouvelles donnees dans le depot
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/raw data/processed data/models
+          git diff --staged --quiet && { echo "Aucune donnee nouvelle a enregistrer."; exit 0; }
+          git commit -m "Scraping automatique $(date -u +'%Y-%m-%d %H:%M UTC')"
+          # BUG CORRIGE : le workflow utilisait "git pull --rebase -X ours".
+          # Pendant un REBASE les roles sont inverses par rapport a un merge :
+          # "ours" designe la branche sur laquelle on rejoue (le depot distant)
+          # et "theirs" les commits rejoues (les donnees tout juste scrapees).
+          # "-X ours" jetait donc silencieusement le scraping de la nuit en cas
+          # de conflit -- exactement l'inverse de l'intention affichee.
+          git pull --rebase -X theirs origin main
+          git push origin main

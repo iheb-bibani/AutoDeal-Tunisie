@@ -1,0 +1,45 @@
+{
+  "date_entrainement": "2026-07-23T22:12:26",
+  "n_annonces": 2872,
+  "n_folds": 5,
+  "fenetre_jours": 60,
+  "modele_retenu": "HistGradientBoosting",
+  "features_numeriques": [
+    "Kilométrage",
+    "Année",
+    "Age_Vehicule",
+    "Puissance_Fiscale",
+    "Puissance_DIN",
+    "Cylindree",
+    "Segment_Vehicule",
+    "Est_Presque_Neuve",
+    "Zone_Economique"
+  ],
+  "features_categorielles": [
+    "Marque",
+    "Modèle",
+    "Boite_Vitesse",
+    "Energie",
+    "Transmission"
+  ],
+  "candidats": [
+    {
+      "nom": "Ridge (baseline linéaire)",
+      "mdape_pct": 11.72,
+      "mdae_dt": 6559,
+      "mae_dt": 13433
+    },
+    {
+      "nom": "RandomForest",
+      "mdape_pct": 12.65,
+      "mdae_dt": 7327,
+      "mae_dt": 13458
+    },
+    {
+      "nom": "HistGradientBoosting",
+      "mdape_pct": 10.67,
+      "mdae_dt": 5907,
+      "mae_dt": 11864
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "protocole": "Ensemble d'évaluation figé aux annonces de moins de 30 jours (celles scorées en production). Seules les annonces plus anciennes ajoutées à l'entraînement varient. Les anciennes ne sont jamais en test. 5 folds, répété sur 5 graines aléatoires.",
+  "modele": "HistGradientBoosting",
+  "n_evaluation": 2308,
+  "date_mesure": "2026-07-23",
+  "resultats": [
+    {"fenetre": "30 j",  "jours": 30,  "n_train": 2308, "err_rel_moy": 10.83, "ecart_type": 0.27},
+    {"fenetre": "45 j",  "jours": 45,  "n_train": 2842, "err_rel_moy": 10.39, "ecart_type": 0.15},
+    {"fenetre": "60 j",  "jours": 60,  "n_train": 2872, "err_rel_moy": 10.28, "ecart_type": 0.12},
+    {"fenetre": "90 j",  "jours": 90,  "n_train": 3142, "err_rel_moy": 10.25, "ecart_type": 0.13},
+    {"fenetre": "120 j", "jours": 120, "n_train": 3272, "err_rel_moy": 10.49, "ecart_type": 0.15},
+    {"fenetre": "180 j", "jours": 180, "n_train": 3288, "err_rel_moy": 10.39, "ecart_type": 0.14},
+    {"fenetre": "365 j", "jours": 365, "n_train": 3384, "err_rel_moy": 10.32, "ecart_type": 0.20},
+    {"fenetre": "toutes","jours": 420, "n_train": 3581, "err_rel_moy": 10.27, "ecart_type": 0.20}
+  ],
+  "conclusion": "Seule la fenêtre à 30 jours se distingue : elle est la pire. Toutes les fenêtres de 45 jours et plus sont indiscernables — l'écart entre 60 j et 90 j (0,03 point) est quatre fois plus petit que le bruit entre graines (0,12 point), et 90 j ne bat 60 j que 3 fois sur 5. Valeur retenue : 60 jours."
+}

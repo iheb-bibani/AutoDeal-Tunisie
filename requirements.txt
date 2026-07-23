@@ -1,0 +1,23 @@
+# Versions épinglées volontairement.
+#
+# scikit-learn est épinglé À L'EXACT : le modèle data/models/modele_prix.pkl est
+# entraîné par GitHub Actions puis chargé par Streamlit Cloud. Si les deux
+# environnements résolvent des versions différentes, le dépickle casse et le
+# calculateur de Juste Prix tombe en erreur -- sans que rien d'autre ne signale
+# le problème. Les deux doivent installer strictement la même version.
+scikit-learn==1.9.0
+joblib>=1.4
+
+pandas>=2.2
+numpy>=1.26
+python-dotenv>=1.0
+requests>=2.31
+
+# Application
+streamlit>=1.40
+plotly>=5.24
+
+# Scraping
+beautifulsoup4>=4.12
+playwright>=1.45
+patchright>=1.45

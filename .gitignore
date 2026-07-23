@@ -1,0 +1,11 @@
+# Ne JAMAIS committer : identifiants réels
+.env
+
+# Fichiers Python courants
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Dossier de session Playwright/Patchright (cookies persistés pour automobile.tn)
+user_data/
