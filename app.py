@@ -513,35 +513,64 @@ de l'équipement et non de l'âge.
 
     decote = calculer_decote_annuelle(df)
     if len(decote):
-        col_g, col_h = st.columns(2)
-        with col_g:
-            top_d = decote.sort_values("decote_pct_an").head(15).sort_values("decote_pct_an", ascending=False)
+        # Les deux panneaux ne doivent JAMAIS montrer les mêmes modèles.
+        # Avec un head(15) fixe, dès que la fonction retourne moins de 30
+        # modèles les deux listes se recouvrent, et à 15 elles deviennent
+        # identiques : on affiche alors deux fois la même chose, l'une
+        # étiquetée "perdent le plus vite" et l'autre "tiennent le mieux".
+        # En prenant au plus la moitié de chaque côté, le recouvrement est
+        # structurellement impossible.
+        k = min(15, len(decote) // 2)
+
+        if k < 3:
+            # Trop peu de modèles pour opposer deux groupes : un seul
+            # graphique, honnête, avec tout ce qui est disponible.
+            tout = decote.sort_values("decote_pct_an")
             fig = px.bar(
-                top_d, x="decote_pct_an", y="libelle", orientation="h",
-                title="Perdent le plus vite leur valeur",
+                tout, x="decote_pct_an", y="libelle", orientation="h",
+                title=f"Décote annuelle — les {len(tout)} modèles disponibles",
                 labels={"decote_pct_an": "Décote (% par an)", "libelle": ""},
                 custom_data=["n", "prix_median"],
             )
             fig.update_traces(
-                marker_color=C_ALERTE,
+                marker_color=C_ASPHALTE,
                 hovertemplate="%{y} : %{x:.1f} %/an<br>%{customdata[0]} annonces — "
                               "prix médian %{customdata[1]:,.0f} DT<extra></extra>",
             )
-            st.plotly_chart(style_figure(fig, 460), width="stretch")
-        with col_h:
-            garde = decote.sort_values("decote_pct_an", ascending=True).head(15)
-            fig = px.bar(
-                garde, x="decote_pct_an", y="libelle", orientation="h",
-                title="Tiennent le mieux leur valeur",
-                labels={"decote_pct_an": "Décote (% par an)", "libelle": ""},
-                custom_data=["n", "prix_median"],
-            )
-            fig.update_traces(
-                marker_color=C_GAIN,
-                hovertemplate="%{y} : %{x:.1f} %/an<br>%{customdata[0]} annonces — "
-                              "prix médian %{customdata[1]:,.0f} DT<extra></extra>",
-            )
-            st.plotly_chart(style_figure(fig, 460), width="stretch")
+            st.plotly_chart(style_figure(fig, max(280, 30 * len(tout))), width="stretch")
+            st.warning(f"Seuls {len(decote)} modèles ont assez d'annonces pour estimer une "
+                       "décote. Trop peu pour opposer « perdent le plus vite » et « tiennent "
+                       "le mieux » sans afficher deux fois les mêmes véhicules.")
+        else:
+            col_g, col_h = st.columns(2)
+            with col_g:
+                top_d = decote.sort_values("decote_pct_an").head(k).sort_values("decote_pct_an", ascending=False)
+                fig = px.bar(
+                    top_d, x="decote_pct_an", y="libelle", orientation="h",
+                    title=f"Perdent le plus vite leur valeur (top {k})",
+                    labels={"decote_pct_an": "Décote (% par an)", "libelle": ""},
+                    custom_data=["n", "prix_median"],
+                )
+                fig.update_traces(
+                    marker_color=C_ALERTE,
+                    hovertemplate="%{y} : %{x:.1f} %/an<br>%{customdata[0]} annonces — "
+                                  "prix médian %{customdata[1]:,.0f} DT<extra></extra>",
+                )
+                st.plotly_chart(style_figure(fig, 460), width="stretch")
+            with col_h:
+                garde = decote.sort_values("decote_pct_an", ascending=False).head(k)
+                fig = px.bar(
+                    garde, x="decote_pct_an", y="libelle", orientation="h",
+                    title=f"Tiennent le mieux leur valeur (top {k})",
+                    labels={"decote_pct_an": "Décote (% par an)", "libelle": ""},
+                    custom_data=["n", "prix_median"],
+                )
+                fig.update_traces(
+                    marker_color=C_GAIN,
+                    hovertemplate="%{y} : %{x:.1f} %/an<br>%{customdata[0]} annonces — "
+                                  "prix médian %{customdata[1]:,.0f} DT<extra></extra>",
+                )
+                st.plotly_chart(style_figure(fig, 460), width="stretch")
 
         st.download_button(
             "⬇️ Télécharger le tableau des décotes (CSV)",
