@@ -9,3 +9,8 @@ venv/
 
 # Dossier de session Playwright/Patchright (cookies persistés pour automobile.tn)
 user_data/
+
+# Journaux d'execution : regenerés à chaque run, ils créent des modifications
+# à chaque commit automatique et polluent l'historique.
+logs/
+*.log
