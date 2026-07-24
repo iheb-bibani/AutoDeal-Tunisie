@@ -32,7 +32,18 @@ jobs:
           # et le push suivant est rejete avec "fetch first" -- exactement
           # l'echec constate en production.
           fetch-depth: 0
-
+            
+      - name: Debug version code
+        run: |
+          git log -1 --oneline
+          ls -la
+          ls -la utils
+          python - <<'PY'
+          from pathlib import Path
+          print("logger existe:", Path("logger.py").exists())
+          print("send telegram:")
+          print(Path("utils/send_telegram.py").read_text()[:300])
+          PY
       - name: Installer Python
         uses: actions/setup-python@v5
         with:
