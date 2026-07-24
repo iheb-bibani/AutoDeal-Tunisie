@@ -22,6 +22,9 @@ COLONNES_FINALES = [
     "Kilométrage", "Energie", "Boite", "Localisation",
     "Puissance_Fiscale", "Etat_Vehicule", "Annonce-Deposee",
     "Annonce-Detectee", "Statut", "Lien",
+    # Équipements réellement présents sur le véhicule (bloc "Équipements" de
+    # la page détail, déjà chargée pour les spécifications -- coût nul).
+    "Nb_Options", "Options",
 ]
 
 
@@ -43,6 +46,30 @@ def parser_date_dmy(texte):
 
     jour, mois, annee = match.groups()
     return f"{int(annee):04d}-{int(mois):02d}-{int(jour):02d}"
+
+
+def migrer_colonnes(chemin=FICHIER_AUTOMOBILE):
+    """Ajoute les colonnes manquantes à un CSV écrit par une version
+    antérieure du scraper.
+
+    Les lignes sont ajoutées en mode append : si l'en-tête du fichier compte
+    16 colonnes et qu'on y ajoute des lignes de 18 valeurs, tout le fichier
+    se décale silencieusement. On réécrit donc l'en-tête une bonne fois,
+    les anciennes annonces gardant simplement des options vides.
+    """
+    if not os.path.exists(chemin) or os.path.getsize(chemin) == 0:
+        return
+    try:
+        df = pd.read_csv(chemin, sep=";", encoding="utf-8-sig")
+    except Exception:
+        return
+    manquantes = [c for c in COLONNES_FINALES if c not in df.columns]
+    if not manquantes:
+        return
+    for col in manquantes:
+        df[col] = pd.NA
+    df[COLONNES_FINALES].to_csv(chemin, index=False, sep=";", encoding="utf-8-sig")
+    print(f"Colonnes ajoutées à {chemin} : {', '.join(manquantes)}")
 
 
 def enregistrer_ligne(car, chemin=FICHIER_AUTOMOBILE):
@@ -95,6 +122,41 @@ def chercher_spec_approximative(specs: dict, *sous_chaines):
             if sous_chaine in cle:
                 return valeur
     return None
+
+
+def extraire_equipements(soup):
+    """Liste les options RÉELLEMENT présentes sur le véhicule.
+
+    Structure du bloc Équipements sur automobile.tn :
+
+        <div class="equipments-wrapper">
+          <div class="box">
+            <div class="box-inner-title"> Sécurité </div>
+            <div class="checked-specs">
+              <ul>
+                <li><span class="spec-value">ABS</span></li>                <- absente
+                <li class="highlighted"><span class="spec-value">ESP</span></li>  <- PRÉSENTE
+              </ul>
+
+    Chaque <li> est une option *possible* pour ce modèle ; seules celles
+    portant la classe "highlighted" équipent effectivement la voiture. Lire
+    tous les <li> reviendrait à donner la liste du catalogue constructeur,
+    identique pour deux voitures pourtant très différemment équipées.
+
+    Aucune requête supplémentaire : la page détail est déjà chargée pour en
+    extraire les spécifications.
+    """
+    wrapper = soup.select_one("div.equipments-wrapper")
+    if not wrapper:
+        return []
+    options = []
+    for li in wrapper.select("div.checked-specs li.highlighted"):
+        span_valeur = li.select_one("span.spec-value")
+        if span_valeur:
+            texte = " ".join(span_valeur.get_text().split())
+            if texte:
+                options.append(texte)
+    return options
 
 
 def extraire_specs_dynamiques(html_page, url_annonce):
@@ -177,6 +239,11 @@ def extraire_specs_dynamiques(html_page, url_annonce):
         "Annonce-Detectee": datetime.now().strftime("%Y-%m-%d"),
         "Statut": None,
     }
+
+    options = extraire_equipements(soup)
+    infos_standard["Nb_Options"] = len(options)
+    infos_standard["Options"] = " | ".join(options) if options else None
+
     return infos_standard
 
 
@@ -216,6 +283,7 @@ def attendre_cloudflare(page, timeout_ms=120000):
 # -------------------------------------------------
 
 def scrape_automobile_tn():
+    migrer_colonnes()
     print("🛰️ Lancement du Scraper Automobile.tn (Anti-Bot activé)...")
     liens_annonces = []
 
