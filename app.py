@@ -271,8 +271,15 @@ def calculer_decote_annuelle(df):
 def calculer_prime_pro(df):
     """Écart de prix pro vs particulier pour un même modèle, à âge égal.
 
-    Pour chaque modèle : log(prix) ~ âge + vendeur_pro. Le coefficient du
-    vendeur donne l'écart une fois l'âge neutralisé.
+    Pour chaque modèle : log(prix) ~ âge + kilométrage + vendeur_pro. Le
+    coefficient du vendeur donne l'écart une fois l'âge ET le kilométrage
+    neutralisés.
+
+    Le kilométrage est indispensable ici : à âge égal, pros et particuliers ne
+    vendent pas des véhicules au même compteur. Sans ce contrôle, 5 modèles
+    sur 35 affichaient un écart de signe opposé à la réalité -- un pro vendant
+    des exemplaires plus roulés paraissait « vendre moins cher » alors qu'à
+    kilométrage comparable il vend plus cher.
 
     Garde-fou décisif : les deux populations doivent se recouvrir en âge sur
     au moins MIN_RECOUVREMENT_ANS années, et la régression n'est faite que sur
@@ -282,7 +289,7 @@ def calculer_prime_pro(df):
     des véhicules récents et les particuliers des véhicules deux fois plus
     vieux du même modèle.
     """
-    d = df.dropna(subset=["Prix", "Age_Vehicule", "Marque", "Modèle", "Source"])
+    d = df.dropna(subset=["Prix", "Age_Vehicule", "Kilométrage", "Marque", "Modèle", "Source"])
     d = d[d["Age_Vehicule"].between(0, 25) & (d["Prix"] > 0)].copy()
     d["est_pro"] = d["Source"].str.lower().str.contains("automobile", na=False).astype(int)
 
@@ -300,12 +307,17 @@ def calculer_prime_pro(df):
         n_part = int((zone["est_pro"] == 0).sum())
         if n_pro < MIN_PAR_COTE or n_part < MIN_PAR_COTE:
             continue
-        X = np.column_stack([np.ones(len(zone)), zone["Age_Vehicule"], zone["est_pro"]])
+        X = np.column_stack([
+            np.ones(len(zone)),
+            zone["Age_Vehicule"],
+            zone["Kilométrage"] / 10000,
+            zone["est_pro"],
+        ])
         try:
             coef, *_ = np.linalg.lstsq(X, np.log(zone["Prix"]), rcond=None)
         except np.linalg.LinAlgError:
             continue
-        prime = (np.exp(coef[2]) - 1) * 100
+        prime = (np.exp(coef[3]) - 1) * 100
         if not np.isfinite(prime):
             continue
         lignes.append({
@@ -314,6 +326,8 @@ def calculer_prime_pro(df):
             "prime_pct": prime,
             "n_pro": n_pro, "n_particulier": n_part,
             "age_min": age_min, "age_max": age_max,
+            "km_median_pro": float(zone[zone["est_pro"] == 1]["Kilométrage"].median()),
+            "km_median_particulier": float(zone[zone["est_pro"] == 0]["Kilométrage"].median()),
         })
     return pd.DataFrame(lignes)
 
@@ -321,6 +335,71 @@ def calculer_prime_pro(df):
 # ===========================================================================
 # 1. VUE MARCHÉ (concessionnaire)
 # ===========================================================================
+
+@st.cache_data
+def calculer_indice_depreciation(df, marques, age_max=20, n_min_par_age=5):
+    """Profil de dépréciation par marque, corrigé de la composition.
+
+    Une courbe de prix médian par âge est trompeuse : le panier de modèles
+    change avec l'âge. Sur les données réelles, la courbe Peugeot *monte*
+    entre 3 et 5 ans -- non parce qu'une Peugeot prend de la valeur, mais
+    parce qu'à 3 ans l'échantillon est dominé par des 301 (berline
+    économique) et à 5 ans par des 3008 (SUV). C'est un changement de
+    composition, pas de la dépréciation.
+
+    Ici : log(prix) ~ effets fixes MODÈLE + effets fixes ÂGE. Les indicatrices
+    de modèle absorbent la composition ; le profil d'âge restant est celui
+    d'un même modèle qui vieillit. Il est exprimé en indice base 100 à l'âge
+    le plus bas observé, et l'âge reste catégoriel pour conserver la forme
+    réelle de la courbe (chute forte les premières années) plutôt que de
+    l'aplatir en droite.
+    """
+    d = df.dropna(subset=["Prix", "Age_Vehicule", "Marque", "Modèle"])
+    d = d[d["Age_Vehicule"].between(0, age_max) & (d["Prix"] > 0)]
+
+    sorties = []
+    for marque in marques:
+        sub = d[d["Marque"] == marque].copy()
+        # Modèles trop rares : ils ne peuvent pas servir de référence stable
+        vc = sub["Modèle"].value_counts()
+        sub = sub[sub["Modèle"].isin(vc[vc >= 5].index)]
+        # Âges trop peu représentés : une médiane sur 2 annonces n'est pas un point
+        va = sub["Age_Vehicule"].value_counts()
+        sub = sub[sub["Age_Vehicule"].isin(va[va >= n_min_par_age].index)]
+        if len(sub) < 40 or sub["Modèle"].nunique() < 2 or sub["Age_Vehicule"].nunique() < 4:
+            continue
+
+        # L'âge est traité en catégoriel, mais la référence doit être l'âge le
+        # PLUS JEUNE. Encoder l'âge en texte et laisser drop_first choisir
+        # prendrait la première valeur par ordre alphabétique -- soit "10"
+        # avant "2" -- et l'indice serait rapporté à une base absurde.
+        ages = sorted(sub["Age_Vehicule"].astype(int).unique())
+        age_ref = ages[0]
+        for age in ages[1:]:
+            sub[f"_age_{age}"] = (sub["Age_Vehicule"].astype(int) == age).astype(float)
+        colonnes_age = [f"_age_{a}" for a in ages[1:]]
+
+        X = pd.get_dummies(sub[["Modèle"]], drop_first=True).astype(float)
+        for col in colonnes_age:
+            X[col] = sub[col].values
+        X.insert(0, "const", 1.0)
+        try:
+            coef, *_ = np.linalg.lstsq(X.values, np.log(sub["Prix"].values), rcond=None)
+        except np.linalg.LinAlgError:
+            continue
+
+        cols = list(X.columns)
+        for age in ages:
+            nom = f"_age_{age}"
+            effet = coef[cols.index(nom)] if nom in cols else 0.0  # 0 pour l'âge de référence
+            sorties.append({
+                "Marque": marque, "age": age,
+                "indice": float(np.exp(effet) * 100),
+                "n": int((sub["Age_Vehicule"] == age).sum()),
+                "age_ref": age_ref,
+            })
+    return pd.DataFrame(sorties)
+
 
 def page_marche(df):
     st.title("📊 Vue Marché")
@@ -370,8 +449,9 @@ def page_marche(df):
 
     # ---- Dépréciation ----------------------------------------------------
     st.subheader("Courbe de dépréciation")
-    st.caption("Prix médian par âge du véhicule — l'outil de base pour estimer une reprise "
-               "ou fixer un prix de revente cohérent avec l'âge.")
+    st.caption("Perte de valeur selon l'âge, **à modèle constant** — la composition du parc "
+               "change avec l'âge, et la corriger est indispensable pour lire une vraie "
+               "dépréciation.")
 
     marques_dispo = df["Marque"].value_counts()
     marques_courbe = st.multiselect(
@@ -379,25 +459,51 @@ def page_marche(df):
         options=list(marques_dispo[marques_dispo >= 15].index),
         default=[m for m in ["Volkswagen", "Peugeot", "Kia", "Mercedes-Benz"] if marques_dispo.get(m, 0) >= 15][:4],
     )
-    base_depr = df[df["Age_Vehicule"].between(0, 20)]
-    if marques_courbe:
-        depr = (
-            base_depr[base_depr["Marque"].isin(marques_courbe)]
-            .groupby(["Marque", "Age_Vehicule"])["Prix"].median().reset_index()
-        )
+
+    indice = calculer_indice_depreciation(df, marques_courbe) if marques_courbe else pd.DataFrame()
+    if len(indice):
         fig = px.line(
-            depr, x="Age_Vehicule", y="Prix", color="Marque", markers=True,
-            title="Prix médian selon l'âge du véhicule",
-            labels={"Age_Vehicule": "Âge (années)", "Prix": "Prix médian (DT)"},
+            indice, x="age", y="indice", color="Marque", markers=True,
+            title="Indice de valeur selon l'âge (base 100 au plus jeune âge observé)",
+            labels={"age": "Âge (années)", "indice": "Indice de valeur"},
+            custom_data=["n"],
         )
-    else:
-        depr = base_depr.groupby("Age_Vehicule")["Prix"].median().reset_index()
-        fig = px.line(
-            depr, x="Age_Vehicule", y="Prix", markers=True,
-            title="Prix médian selon l'âge du véhicule — tout le marché",
-            labels={"Age_Vehicule": "Âge (années)", "Prix": "Prix médian (DT)"},
-        )
-    st.plotly_chart(style_figure(fig), width="stretch")
+        fig.update_traces(hovertemplate="%{y:.0f} (base 100)<br>%{x} ans — "
+                                        "%{customdata[0]} annonces<extra></extra>")
+        st.plotly_chart(style_figure(fig), width="stretch")
+
+        with st.expander("ℹ️ Pourquoi un indice, et pas le prix médian par âge"):
+            st.write(
+                """
+Tracer le prix médian par âge donne une courbe fausse, parce que le panier de
+modèles change avec l'âge. Sur les données réelles, la courbe Peugeot
+**montait** entre 3 et 5 ans :
+
+| Âge | Prix médian | Modèles dominants |
+|---|---|---|
+| 3 ans | 34 700 DT | **301** ×14, 208 ×6 |
+| 5 ans | 62 500 DT | **3008** ×5, 208 ×5 |
+
+Une Peugeot ne prend pas de la valeur en vieillissant : à 3 ans l'échantillon
+est dominé par des 301 (berline économique), à 5 ans par des 3008 (SUV). C'est
+un changement de composition, pas de la dépréciation.
+
+L'indice est calculé par `log(prix) ~ effets fixes modèle + effets fixes âge`.
+Les indicatrices de modèle absorbent la composition ; le profil d'âge restant
+est celui d'un même modèle qui vieillit. L'âge reste catégoriel pour conserver
+la forme réelle de la courbe — la chute des premières années — au lieu de
+l'aplatir en droite. Les âges représentés par moins de 5 annonces sont exclus :
+une médiane sur 2 annonces n'est pas un point de courbe.
+
+**Limite.** La mesure reste transversale : on compare des véhicules d'âges
+différents à un instant donné, on ne suit pas un véhicule dans le temps. Si les
+millésimes récents sont mieux équipés que les anciens, une part de l'écart vient
+de l'équipement et non de l'âge.
+"""
+            )
+    elif marques_courbe:
+        st.info("Pas assez d'annonces pour ces marques (il faut au moins 40 annonces, "
+                "2 modèles distincts et 4 âges différents avec 5 annonces chacun).")
 
     # ---- Décote annuelle par modèle --------------------------------------
     st.subheader("Décote annuelle par modèle")
@@ -462,13 +568,16 @@ def page_marche(df):
             top, x="prime_pct", y="libelle", orientation="h",
             title="Écart de prix pro vs particulier, à âge comparable",
             labels={"prime_pct": "Prime professionnelle (%)", "libelle": ""},
-            custom_data=["n_pro", "n_particulier", "age_min", "age_max"],
+            custom_data=["n_pro", "n_particulier", "age_min", "age_max",
+                         "km_median_pro", "km_median_particulier"],
         )
         fig.update_traces(
             marker_color=[C_GAIN if v > 0 else C_ALERTE for v in top["prime_pct"]],
             hovertemplate="%{y} : %{x:+.0f} %<br>%{customdata[0]} annonces pro / "
                           "%{customdata[1]} particulier<br>Âges comparés : "
-                          "%{customdata[2]:.0f}–%{customdata[3]:.0f} ans<extra></extra>",
+                          "%{customdata[2]:.0f}–%{customdata[3]:.0f} ans"
+                          "<br>Km médian : %{customdata[4]:,.0f} (pro) / "
+                          "%{customdata[5]:,.0f} (particulier)<extra></extra>",
         )
         fig.add_vline(x=0, line_color=C_GRIS, line_width=1)
         st.plotly_chart(style_figure(fig, 430), width="stretch")
