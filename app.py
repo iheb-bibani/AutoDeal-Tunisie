@@ -423,7 +423,7 @@ def page_marche(df):
             )
             st.plotly_chart(style_figure(fig, 460), width="stretch")
         with col_h:
-            garde = decote.sort_values("decote_pct_an", ascending=False).head(15)
+            garde = decote.sort_values("decote_pct_an", ascending=True).head(15)
             fig = px.bar(
                 garde, x="decote_pct_an", y="libelle", orientation="h",
                 title="Tiennent le mieux leur valeur",
@@ -1092,6 +1092,93 @@ def page_admin(df, df_deals):
     else:
         st.info(f"`{CALIB_PATH}` introuvable — la calibration est une mesure ponctuelle, "
                 "pas une étape du pipeline.")
+
+    st.divider()
+
+    # ---- Validation par les disparitions réelles -------------------------
+    st.subheader("Validation — les opportunités partent-elles plus vite ?")
+    st.caption("Le seul endroit du projet où l'on confronte les prédictions à un fait observé. "
+               "Une annonce qui disparaît n'est pas forcément vendue — elle peut avoir été "
+               "retirée ou avoir expiré — mais c'est le meilleur proxy disponible.")
+
+    suivi = None
+    try:
+        suivi = lire_csv("data/processed/suivi_annonces.csv")
+    except Exception:
+        pass
+
+    if suivi is None or "Jours_En_Ligne" not in suivi.columns:
+        st.info("Le suivi des annonces n'a pas encore tourné. Il démarre au prochain "
+                "`python main.py`.")
+    else:
+        jours = pd.to_numeric(suivi["Jours_En_Ligne"], errors="coerce")
+        mesurees = suivi[jours.notna()].copy()
+        mesurees["jours"] = jours[jours.notna()]
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Annonces suivies", f"{len(suivi):,}".replace(",", " "))
+        c2.metric("Disparues (mesurables)", len(mesurees))
+        c3.metric("Signalées comme opportunité",
+                  int(suivi["Etait_Opportunite"].sum()) if "Etait_Opportunite" in suivi.columns else 0)
+
+        if len(mesurees) < 30:
+            st.info(
+                f"**{len(mesurees)} annonces disparues** — il en faut plusieurs dizaines pour "
+                "comparer quoi que ce soit. Le suivi s'enrichit à chaque exécution nocturne : "
+                "compte quelques semaines avant que cette section devienne lisible.\n\n"
+                "Ce qui apparaîtra ici : la durée en ligne des annonces signalées comme "
+                "opportunités face à celle des autres. Si les deux sont identiques, le "
+                "détecteur ne détecte rien d'utile — et il vaudra mieux le savoir."
+            )
+        else:
+            deals = mesurees[mesurees["Etait_Opportunite"] == True]      # noqa: E712
+            autres = mesurees[mesurees["Etait_Opportunite"] != True]     # noqa: E712
+            if len(deals) >= 10 and len(autres) >= 10:
+                ca, cb = st.columns(2)
+                ca.metric("Durée médiane — opportunités", f"{deals['jours'].median():.0f} j")
+                cb.metric("Durée médiane — autres annonces", f"{autres['jours'].median():.0f} j")
+
+                fig = go.Figure()
+                fig.add_trace(go.Box(x=autres["jours"], name="Autres annonces",
+                                     marker_color=C_GRIS, boxmean=True))
+                fig.add_trace(go.Box(x=deals["jours"], name="Signalées opportunité",
+                                     marker_color=C_GAIN, boxmean=True))
+                fig.update_layout(title="Durée en ligne avant disparition")
+                fig.update_xaxes(title="Jours en ligne")
+                st.plotly_chart(style_figure(fig, 320), width="stretch")
+
+                ecart = autres["jours"].median() - deals["jours"].median()
+                if ecart > 1:
+                    st.success(f"Les annonces signalées disparaissent environ **{ecart:.0f} jours "
+                               "plus vite** que les autres — le détecteur capte bien quelque chose.")
+                elif ecart < -1:
+                    st.error("Les annonces signalées restent **plus longtemps** en ligne que les "
+                             "autres. Le détecteur sélectionne probablement des véhicules peu "
+                             "demandés plutôt que des bonnes affaires — seuils à revoir.")
+                else:
+                    st.warning("Aucune différence nette entre les deux groupes. En l'état, le "
+                               "détecteur n'apporte pas de signal mesurable sur la vitesse "
+                               "d'écoulement.")
+            else:
+                st.info("Pas encore assez d'annonces disparues dans chacun des deux groupes "
+                        "(minimum 10 de chaque côté).")
+
+            # Liquidité réelle par modèle
+            par_modele = (mesurees.groupby(["Marque", "Modèle"])["jours"]
+                          .agg(["size", "median"]).reset_index())
+            par_modele = par_modele[par_modele["size"] >= 5].sort_values("median")
+            if len(par_modele):
+                par_modele["libelle"] = par_modele["Marque"] + " " + par_modele["Modèle"].astype(str)
+                fig = px.bar(par_modele.head(15).sort_values("median", ascending=False),
+                             x="median", y="libelle", orientation="h",
+                             title="Modèles qui partent le plus vite (durée réelle en ligne)",
+                             labels={"median": "Jours en ligne (médiane)", "libelle": ""},
+                             custom_data=["size"])
+                fig.update_traces(marker_color=C_GAIN,
+                                  hovertemplate="%{y} : %{x:.0f} j (n=%{customdata[0]})<extra></extra>")
+                st.plotly_chart(style_figure(fig, 420), width="stretch")
+                st.caption("Cette mesure remplacera à terme le `Score_Liquidite`, qui n'est "
+                           "aujourd'hui qu'un proxy fondé sur le volume d'annonces.")
 
     st.divider()
 
