@@ -1,18 +1,17 @@
 import sys
 from pathlib import Path
 
-# Lancé en tant que script (`python utils/send_telegram.py`), Python place le
-# dossier du SCRIPT en tête de sys.path -- ici `utils/` -- et non la racine du
-# projet. Les imports `config` et `logger`, qui vivent à la racine, échouent
-# alors avec ModuleNotFoundError. Les scripts de core/ font déjà cet ajout ;
-# ceux d'utils/ l'avaient oublié, ce qui cassait les alertes Telegram en CI.
-sys.path.insert(0, str(Path(__file__).parent.parent))
+ROOT = Path(__file__).resolve().parents[1]
+
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import pandas as pd
 import requests
 import os
 import time
 from dotenv import load_dotenv
+
 from logger import get_logger
 from config import PROCESSED_FILES, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 
