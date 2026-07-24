@@ -751,34 +751,6 @@ acheter, l'orange celles où revendre.
 """
                 )
 
-    if False and "Localisation" in df.columns:
-        stats_r = calculer_prix_ajuste(df, "Localisation").head(15)
-        fig = px.bar(
-            x=stats_r["prix_ajuste"], y=stats_r.index, orientation="h",
-            title="Prix médian par région, ajusté (top 15)",
-            labels={"x": "Prix ajusté (DT)", "y": ""},
-        )
-        fig.update_traces(
-            marker_color=C_ASPHALTE, customdata=stats_r["count"],
-            hovertemplate="%{y} : %{x:,.0f} DT (n=%{customdata})<extra></extra>",
-        )
-        st.plotly_chart(style_figure(fig, 430), width="stretch")
-
-        with st.expander("ℹ️ Pourquoi « ajusté » ?"):
-            st.write(
-                f"""
-Une région avec 4-6 annonces peut avoir une médiane faussée par une seule
-voiture atypique. Le **lissage bayésien** corrige ça : plus l'échantillon
-d'une région est petit, plus son prix est ramené vers la médiane nationale
-({df['Prix'].median():,.0f} DT).
-
-`prix_ajusté = (n × médiane_région + {K_LISSAGE} × médiane_nationale) / (n + {K_LISSAGE})`
-
-Une région à n=6 est tirée à ~71 % vers la médiane nationale ; une région à
-n=200 garde quasiment sa propre médiane.
-"""
-            )
-
     # ---- Tendance temporelle --------------------------------------------
     if "Annonce-Detectee" in df.columns and df["Annonce-Detectee"].nunique() >= 2:
         tendance = df.groupby("Annonce-Detectee").agg(prix=("Prix", "median"), n=("Prix", "count")).reset_index()
