@@ -240,7 +240,7 @@ MODELES_PAR_MARQUE_REFERENTIEL = {
 # ============================================================================
 
 FEATURES_NUMERIQUES = [
-    "Kilométrage", "Année", "Age_Vehicule", "Puissance_Fiscale",
+    "Kilométrage", "Année", "Age_Vehicule", "Puissance_Fiscale", "Nb_Options",
     "Segment_Vehicule", "Est_Presque_Neuve", "Zone_Economique"
 ]
 
