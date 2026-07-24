@@ -233,6 +233,50 @@ MIN_RECOUVREMENT_ANS = 2      # recouvrement d'âge minimum entre pros et partic
 
 
 @st.cache_data
+def calculer_niveau_regional(df, n_min=30):
+    """Niveau de prix par région, à véhicule comparable.
+
+    Comparer les prix médians régionaux revient à comparer des paniers de
+    véhicules différents : la corrélation entre le prix médian d'une région
+    et sa part de marques premium est de +0,70 sur les données réelles.
+
+    On estime donc log(prix) ~ modèle + âge + kilométrage + région. Les
+    indicatrices de modèle absorbent la composition ; le coefficient de
+    région mesure ce qui reste, c'est-à-dire le niveau de prix local pour un
+    véhicule identique.
+    """
+    d = df.dropna(subset=["Prix", "Age_Vehicule", "Kilométrage", "Modèle", "Localisation"])
+    d = d[(d["Prix"] > 0) & d["Age_Vehicule"].between(0, 25)].copy()
+    vc = d["Localisation"].value_counts()
+    d = d[d["Localisation"].isin(vc[vc >= n_min].index)]
+    vm = d["Modèle"].value_counts()
+    d = d[d["Modèle"].isin(vm[vm >= 5].index)]
+    if d["Localisation"].nunique() < 3 or len(d) < 200:
+        return pd.DataFrame()
+
+    X = pd.get_dummies(d[["Modèle", "Localisation"]], drop_first=True).astype(float)
+    X["age"] = d["Age_Vehicule"].values
+    X["km"] = d["Kilométrage"].values / 10000
+    X.insert(0, "const", 1.0)
+    try:
+        coef, *_ = np.linalg.lstsq(X.values, np.log(d["Prix"].values), rcond=None)
+    except np.linalg.LinAlgError:
+        return pd.DataFrame()
+
+    cols = list(X.columns)
+    lignes = []
+    for region in sorted(d["Localisation"].unique()):
+        nom = f"Localisation_{region}"
+        effet = coef[cols.index(nom)] if nom in cols else 0.0
+        lignes.append({
+            "Localisation": region,
+            "prime_pct": (np.exp(effet) - 1) * 100,
+            "n": int((d["Localisation"] == region).sum()),
+        })
+    return pd.DataFrame(lignes)
+
+
+@st.cache_data
 def calculer_decote_annuelle(df):
     """Décote annuelle moyenne par modèle.
 
@@ -673,8 +717,41 @@ liste.
             )
             st.plotly_chart(style_figure(fig), width="stretch")
 
-    # ---- Prix par région -------------------------------------------------
+    # ---- Prix par région, à véhicule comparable --------------------------
     if "Localisation" in df.columns:
+        niveau = calculer_niveau_regional(df)
+        if len(niveau):
+            fig = px.bar(
+                niveau.sort_values("prime_pct"), x="prime_pct", y="Localisation",
+                orientation="h",
+                title="Niveau de prix par région, à véhicule comparable",
+                labels={"prime_pct": "Écart vs référence (%)", "Localisation": ""},
+                custom_data=["n"],
+            )
+            fig.update_traces(
+                marker_color=[C_GAIN if v < 0 else C_ALERTE
+                              for v in niveau.sort_values("prime_pct")["prime_pct"]],
+                hovertemplate="%{y} : %{x:+.1f} %<br>%{customdata[0]} annonces<extra></extra>",
+            )
+            fig.add_vline(x=0, line_color=C_GRIS, line_width=1)
+            st.plotly_chart(style_figure(fig, 430), width="stretch")
+            with st.expander("ℹ️ Pourquoi pas simplement le prix médian par région"):
+                st.write(
+                    """
+Le prix médian brut par région ne mesure pas le niveau de prix local, mais la
+composition du parc qui y est vendu. Sur les données réelles, la corrélation
+entre le prix médian d'une région et sa **part de marques premium** est de
+**+0,70** : Tunis n'est pas « chère », 34 % de ses annonces sont des Mercedes,
+BMW ou Audi, contre 10 % à Médenine.
+
+Le graphique ci-dessus vient de `log(prix) ~ modèle + âge + kilométrage +
+région`. Le coefficient de région indique combien **le même véhicule** se
+négocie plus ou moins cher selon l'endroit. Le vert signale les régions où
+acheter, l'orange celles où revendre.
+"""
+                )
+
+    if False and "Localisation" in df.columns:
         stats_r = calculer_prix_ajuste(df, "Localisation").head(15)
         fig = px.bar(
             x=stats_r["prix_ajuste"], y=stats_r.index, orientation="h",
@@ -823,11 +900,22 @@ def page_samsar(df_scored, df_deals):
 
     # ---- Rotation : qu'est-ce qui tourne vite ? --------------------------
     st.subheader("Rotation du marché — qu'est-ce qui part vite ?")
-    st.caption("Volume d'annonces = demande et facilité de revente. Âge médian des annonces "
-               "encore en ligne = proxy de vitesse d'écoulement (plus c'est bas, plus ça tourne).")
+    st.caption("Volume d'annonces = demande et facilité de revente. L'âge des annonces encore "
+               "en ligne sert de proxy d'écoulement — mais uniquement sur tayara.tn, pour la "
+               "raison expliquée sous le second graphique.")
+
+    # L'âge des annonces n'est comparable QU'À SOURCE ÉGALE. automobile.tn ne
+    # conserve pas d'annonces anciennes : la corrélation entre "part de pros"
+    # d'un modèle et l'âge médian de ses annonces est de -0,43. Mélanger les
+    # sources faisait apparaître Audi A5, BMW Série 5 ou Range Rover Sport
+    # comme les modèles "les plus rapides" -- tous à 100 % de pros. On ne
+    # mesurait pas la vitesse d'écoulement mais le site d'origine.
+    base_rotation = df_scored[
+        df_scored["Source"].astype(str).str.lower().str.contains("tayara", na=False)
+    ]
 
     rotation = (
-        df_scored.dropna(subset=["Marque", "Modèle"])
+        base_rotation.dropna(subset=["Marque", "Modèle"])
         .groupby(["Marque", "Modèle"])
         .agg(volume=("Prix", "count"),
              age_annonce_median=("Age_Annonce_Jours", "median"),
@@ -857,7 +945,7 @@ def page_samsar(df_scored, df_deals):
                 "age_annonce_median", ascending=False)
             fig = px.bar(
                 rapides, x="age_annonce_median", y="libelle", orientation="h",
-                title="Modèles dont les annonces sont les plus fraîches (écoulement rapide)",
+                title="Écoulement le plus rapide (tayara.tn uniquement)",
                 labels={"age_annonce_median": "Âge médian des annonces (jours)", "libelle": ""},
                 custom_data=["volume", "prix_median"],
             )
@@ -867,6 +955,24 @@ def page_samsar(df_scored, df_deals):
                               "<br>Prix médian : %{customdata[1]:,.0f} DT<extra></extra>",
             )
             st.plotly_chart(style_figure(fig, 420), width="stretch")
+
+        with st.expander("ℹ️ Pourquoi seulement tayara.tn ici"):
+            st.write(
+                """
+L'âge des annonces encore en ligne n'est comparable qu'à **source égale**.
+automobile.tn ne conserve pas d'annonces anciennes : sur les données réelles,
+la corrélation entre la part de professionnels d'un modèle et l'âge médian de
+ses annonces est de **−0,43**. En mélangeant les sources, les modèles
+« les plus rapides » étaient l'Audi A5 Sportback, la BMW Série 5, le X3 et le
+Range Rover Sport — tous à **100 % de pros**. Ce n'était pas de la vitesse
+d'écoulement, c'était le site d'origine.
+
+Restreindre à tayara.tn rend la comparaison honnête, au prix d'un périmètre
+plus étroit. Cette mesure indirecte disparaîtra dès que le suivi des annonces
+(`core/suivi_annonces.py`) aura accumulé quelques semaines : il donnera la
+durée réelle entre publication et disparition, sans proxy.
+"""
+            )
 
     # ---- Arbitrage géographique -----------------------------------------
     st.subheader("Arbitrage géographique — où acheter, où revendre")
