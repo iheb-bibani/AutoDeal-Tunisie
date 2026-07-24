@@ -39,6 +39,7 @@ ETAPES_TRAITEMENT = [
     ("core/enrichir_base_avance.py", True),  # variables dérivées
     ("core/modele_prediction.py", True),     # modèle de prix + scoring
     ("core/detect_deals.py", False),         # filtrage des opportunités
+    ("core/suivi_annonces.py", False),       # suivi apparition/disparition des annonces
 ]
 
 
