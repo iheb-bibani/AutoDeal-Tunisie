@@ -25,6 +25,13 @@ jobs:
     steps:
       - name: Recuperer le depot
         uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 = historique complet. Par defaut checkout ne
+          # recupere qu'UN commit (clone superficiel) : un "git pull --rebase"
+          # ne peut alors pas se raccorder correctement a l'historique distant,
+          # et le push suivant est rejete avec "fetch first" -- exactement
+          # l'echec constate en production.
+          fetch-depth: 0
 
       - name: Installer Python
         uses: actions/setup-python@v5
@@ -69,19 +76,66 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python utils/send_telegram.py
 
-      - name: Enregistrer les nouvelles donnees dans le depot
+      - name: Enregistrer les donnees dans le depot
+        # if: always() et non success(). Le scraping dure plusieurs heures et
+        # les scrapers ecrivent au fil de l'eau dans data/raw : abandonner sur
+        # un echec du modele jetterait une nuit entiere de collecte deja
+        # payee. Mais publier des fichiers TRAITES incoherents serait pire que
+        # de ne rien publier -- on distingue donc les deux :
+        #   - data/raw          : append-only, jamais incoherent -> toujours publie
+        #   - data/processed    : derives du pipeline -> publies seulement si tout a reussi
+        #   - data/models
         if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/raw data/processed data/models
+
+          git add data/raw
+          if [ "${{ job.status }}" = "success" ]; then
+            git add data/processed data/models
+          else
+            echo "Pipeline en echec : seules les donnees brutes sont publiees."
+            echo "Les fichiers traites restent ceux du dernier run reussi."
+            # Indispensable : ces fichiers modifies mais NON stages laisseraient
+            # l'arbre de travail sale, et "git rebase" refuserait alors de
+            # tourner ("error: Please commit or stash them") -- le push
+            # echouerait juste apres, emportant aussi les donnees brutes.
+            # Ils sont de toute facon incoherents et seront regeneres au
+            # prochain run reussi : on les remet a leur dernier etat publie.
+            git checkout -- data/processed data/models 2>/dev/null || true
+          fi
+
           git diff --staged --quiet && { echo "Aucune donnee nouvelle a enregistrer."; exit 0; }
+
           git commit -m "Scraping automatique $(date -u +'%Y-%m-%d %H:%M UTC')"
-          # BUG CORRIGE : le workflow utilisait "git pull --rebase -X ours".
-          # Pendant un REBASE les roles sont inverses par rapport a un merge :
-          # "ours" designe la branche sur laquelle on rejoue (le depot distant)
-          # et "theirs" les commits rejoues (les donnees tout juste scrapees).
-          # "-X ours" jetait donc silencieusement le scraping de la nuit en cas
-          # de conflit -- exactement l'inverse de l'intention affichee.
-          git pull --rebase -X theirs origin main
-          git push origin main
+          git status --short
+
+          # Le push peut etre rejete si un commit est arrive sur le depot
+          # pendant le scraping : un push manuel de ta part, ou un run
+          # precedent. "fetch first" signifie littéralement qu'il faut d'abord
+          # recuperer le distant -- supprimer le rebase ne corrige pas ce
+          # message, il le rend certain. On rejoue donc fetch+rebase+push
+          # plusieurs fois au lieu d'abandonner des donnees deja collectees.
+          #
+          # "-X theirs" : pendant un REBASE les roles sont inverses par rapport
+          # a un merge. "ours" designe la branche sur laquelle on rejoue (le
+          # depot distant) et "theirs" les commits rejoues (les donnees tout
+          # juste scrapees). "-X ours" jetterait donc le scraping de la nuit.
+          for tentative in 1 2 3 4 5; do
+            echo "Publication, tentative $tentative/5..."
+            git fetch origin main
+            if ! git rebase -X theirs origin/main; then
+              echo "Rebase impossible, abandon propre."
+              git rebase --abort || true
+              sleep 10
+              continue
+            fi
+            if git push origin main; then
+              echo "Donnees publiees."
+              exit 0
+            fi
+            echo "Push rejete, nouvelle tentative dans 15 s."
+            sleep 15
+          done
+          echo "Publication impossible apres 5 tentatives."
+          exit 1
