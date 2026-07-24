@@ -62,7 +62,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import MAX_DAYS_OLD
 
-FEATURES_NUMERIQUES = ["Kilométrage", "Année", "Age_Vehicule", "Puissance_Fiscale", "Puissance_DIN", "Cylindree", "Segment_Vehicule", "Est_Presque_Neuve", "Zone_Economique"]
+FEATURES_NUMERIQUES = ["Kilométrage", "Année", "Age_Vehicule", "Puissance_Fiscale", "Puissance_DIN", "Cylindree", "Nb_Options", "Segment_Vehicule", "Est_Presque_Neuve", "Zone_Economique"]
 FEATURES_CATEGORIELLES = ["Marque", "Modèle", "Boite_Vitesse", "Energie", "Transmission"]
 CIBLE = "Prix"
 
