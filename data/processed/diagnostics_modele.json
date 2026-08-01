@@ -1,0 +1,135 @@
+{
+  "date_entrainement": "2026-08-01T14:11:49",
+  "n_annonces": 3331,
+  "n_folds": 5,
+  "fenetre_jours": 60,
+  "modele_retenu": "HistGradientBoosting",
+  "features_numeriques": [
+    "Kilométrage",
+    "Log_Kilometrage",
+    "Age_Vehicule",
+    "Age_Carre",
+    "Km_Par_An",
+    "Puissance_Fiscale",
+    "Cylindree",
+    "Segment_Vehicule"
+  ],
+  "features_categorielles": [
+    "Marque",
+    "Modèle",
+    "Energie",
+    "Transmission"
+  ],
+  "candidats": [
+    {
+      "nom": "Ridge",
+      "mdape_pct": 11.29,
+      "mdae_dt": 6230,
+      "mae_dt": 13152
+    },
+    {
+      "nom": "RandomForest",
+      "mdape_pct": 12.25,
+      "mdae_dt": 6639,
+      "mae_dt": 13338
+    },
+    {
+      "nom": "HistGradientBoosting",
+      "mdape_pct": 10.49,
+      "mdae_dt": 5505,
+      "mae_dt": 11709
+    },
+    {
+      "nom": "CatBoost",
+      "mdape_pct": 11.77,
+      "mdae_dt": 6238,
+      "mae_dt": 12595
+    },
+    {
+      "nom": "LightGBM",
+      "mdape_pct": 12.08,
+      "mdae_dt": 6483,
+      "mae_dt": 12954
+    },
+    {
+      "nom": "XGBoost",
+      "mdape_pct": 10.44,
+      "mdae_dt": 5657,
+      "mae_dt": 12053
+    }
+  ],
+  "selection_robuste": {
+    "shortlist": [
+      {
+        "nom": "XGBoost",
+        "score_robuste_pct": 13.02
+      },
+      {
+        "nom": "HistGradientBoosting",
+        "score_robuste_pct": 12.71
+      }
+    ],
+    "regle": "moyenne KFold + GroupKFold + holdout temporel + moyenne source-holdouts"
+  },
+  "validation_robuste": {
+    "groupkfold_marque_modele": {
+      "mae": 15682.704989929913,
+      "mdae": 8931.795923550724,
+      "mdape": 0.16632834982673314
+    },
+    "time_holdout_20pct": {
+      "mae": 10257.481118211148,
+      "mdae": 4461.297157338457,
+      "mdape": 0.09772189964576079
+    },
+    "source_holdout": [
+      {
+        "source": "AutoMax",
+        "n_test": 35,
+        "mae": 8997.102659048622,
+        "mdae": 4510.5032970735265,
+        "mdape": 0.10050845830586255
+      },
+      {
+        "source": "automobile.tn",
+        "n_test": 2340,
+        "mae": 22120.48090110115,
+        "mdae": 9689.432778863167,
+        "mdape": 0.1577031683481811
+      },
+      {
+        "source": "tayara.tn",
+        "n_test": 956,
+        "mae": 11808.517475868546,
+        "mdae": 5681.567713812074,
+        "mdape": 0.15975561366761076
+      }
+    ]
+  },
+  "diagnostic_zone_economique": {
+    "production_sans_zone_mdape_pct": 10.49,
+    "avec_zone_mdape_pct": 10.37,
+    "gain_zone_points": 0.12,
+    "decision": "Zone exclue de la production tant que le gain n'est pas stable en source-holdout.",
+    "par_source": [
+      {
+        "source": "AutoMax",
+        "n": 35,
+        "part_grand_tunis_pct": 31.4,
+        "prix_median_dt": 44500
+      },
+      {
+        "source": "automobile.tn",
+        "n": 2340,
+        "part_grand_tunis_pct": 77.0,
+        "prix_median_dt": 68000
+      },
+      {
+        "source": "tayara.tn",
+        "n": 956,
+        "part_grand_tunis_pct": 54.8,
+        "prix_median_dt": 34500
+      }
+    ]
+  }
+}

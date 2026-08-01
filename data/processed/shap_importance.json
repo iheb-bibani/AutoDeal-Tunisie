@@ -1,0 +1,55 @@
+{
+  "modele": "HistGradientBoostingRegressor",
+  "n_lignes": 120,
+  "echelle": "log-prix",
+  "importances": [
+    {
+      "feature": "Modèle",
+      "pct": 31.7
+    },
+    {
+      "feature": "Cylindree",
+      "pct": 23.3
+    },
+    {
+      "feature": "Kilométrage",
+      "pct": 18.3
+    },
+    {
+      "feature": "Age_Vehicule",
+      "pct": 8.6
+    },
+    {
+      "feature": "Km_Par_An",
+      "pct": 8.6
+    },
+    {
+      "feature": "Energie",
+      "pct": 4.4
+    },
+    {
+      "feature": "Log_Kilometrage",
+      "pct": 1.7
+    },
+    {
+      "feature": "Transmission",
+      "pct": 1.3
+    },
+    {
+      "feature": "Marque",
+      "pct": 1.1
+    },
+    {
+      "feature": "Age_Carre",
+      "pct": 1.0
+    },
+    {
+      "feature": "Puissance_Fiscale",
+      "pct": 0.0
+    },
+    {
+      "feature": "Segment_Vehicule",
+      "pct": 0.0
+    }
+  ]
+}

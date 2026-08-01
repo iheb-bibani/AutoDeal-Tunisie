@@ -1,0 +1,182 @@
+[
+  {
+    "date": "2026-07-27T00:44:00+00:00",
+    "mdape_global": 11.27,
+    "mdape_par_tranche": {
+      "< 15k": 40.74,
+      "15-25k": 15.59,
+      "25-35k": 10.53,
+      "35-50k": 10.31,
+      "50-75k": 9.3,
+      "75-100k": 9.29,
+      "100k +": 14.69
+    },
+    "instantane": {
+      "n": 3116,
+      "prix_median": 57250.0,
+      "age_median": 7.0,
+      "km_median": 106000.0,
+      "mix_sources": {
+        "automobile.tn": 71.4,
+        "tayara.tn": 27.4,
+        "AutoMax": 1.2
+      },
+      "completude": {
+        "Prix": 100.0,
+        "Marque": 100.0,
+        "Modèle": 99.6
+      }
+    },
+    "drift": []
+  },
+  {
+    "date": "2026-07-28T00:36:53+00:00",
+    "mdape_global": 10.7,
+    "mdape_par_tranche": {
+      "< 15k": 31.06,
+      "15-25k": 14.98,
+      "25-35k": 9.8,
+      "35-50k": 9.73,
+      "50-75k": 9.01,
+      "75-100k": 9.23,
+      "100k +": 13.52
+    },
+    "instantane": {
+      "n": 3167,
+      "prix_median": 57000.0,
+      "age_median": 7.0,
+      "km_median": 106000.0,
+      "mix_sources": {
+        "automobile.tn": 71.1,
+        "tayara.tn": 27.8,
+        "AutoMax": 1.1
+      },
+      "completude": {
+        "Prix": 100.0,
+        "Marque": 100.0,
+        "Modèle": 99.6
+      }
+    },
+    "drift": []
+  },
+  {
+    "date": "2026-07-29T00:29:00+00:00",
+    "mdape_global": 10.77,
+    "mdape_par_tranche": {
+      "< 15k": 31.84,
+      "15-25k": 15.89,
+      "25-35k": 9.2,
+      "35-50k": 9.75,
+      "50-75k": 8.64,
+      "75-100k": 9.23,
+      "100k +": 13.95
+    },
+    "instantane": {
+      "n": 3239,
+      "prix_median": 57000.0,
+      "age_median": 7.0,
+      "km_median": 107000.0,
+      "mix_sources": {
+        "automobile.tn": 71.1,
+        "tayara.tn": 27.8,
+        "AutoMax": 1.1
+      },
+      "completude": {
+        "Prix": 100.0,
+        "Marque": 100.0,
+        "Modèle": 99.6
+      }
+    },
+    "drift": []
+  },
+  {
+    "date": "2026-07-30T00:33:07+00:00",
+    "mdape_global": 10.58,
+    "mdape_par_tranche": {
+      "< 15k": 33.74,
+      "15-25k": 17.84,
+      "25-35k": 8.82,
+      "35-50k": 9.71,
+      "50-75k": 9.09,
+      "75-100k": 9.15,
+      "100k +": 14.06
+    },
+    "instantane": {
+      "n": 3293,
+      "prix_median": 56500.0,
+      "age_median": 7.0,
+      "km_median": 107000.0,
+      "mix_sources": {
+        "automobile.tn": 71.1,
+        "tayara.tn": 27.8,
+        "AutoMax": 1.1
+      },
+      "completude": {
+        "Prix": 100.0,
+        "Marque": 100.0,
+        "Modèle": 99.6
+      }
+    },
+    "drift": []
+  },
+  {
+    "date": "2026-07-31T01:21:16+00:00",
+    "mdape_global": 10.43,
+    "mdape_par_tranche": {
+      "< 15k": 29.78,
+      "15-25k": 15.49,
+      "25-35k": 7.84,
+      "35-50k": 9.95,
+      "50-75k": 8.88,
+      "75-100k": 9.49,
+      "100k +": 12.88
+    },
+    "instantane": {
+      "n": 3319,
+      "prix_median": 56000.0,
+      "age_median": 7.0,
+      "km_median": 107000.0,
+      "mix_sources": {
+        "automobile.tn": 70.5,
+        "tayara.tn": 28.4,
+        "AutoMax": 1.1
+      },
+      "completude": {
+        "Prix": 100.0,
+        "Marque": 100.0,
+        "Modèle": 99.6
+      }
+    },
+    "drift": []
+  },
+  {
+    "date": "2026-08-01T01:23:11+00:00",
+    "mdape_global": 10.36,
+    "mdape_par_tranche": {
+      "< 15k": 29.03,
+      "15-25k": 15.19,
+      "25-35k": 9.59,
+      "35-50k": 9.52,
+      "50-75k": 8.89,
+      "75-100k": 9.44,
+      "100k +": 13.55
+    },
+    "instantane": {
+      "n": 3335,
+      "prix_median": 56000.0,
+      "age_median": 7.0,
+      "km_median": 106000.0,
+      "mix_sources": {
+        "automobile.tn": 70.2,
+        "tayara.tn": 28.8,
+        "AutoMax": 1.0
+      },
+      "completude": {
+        "Prix": 100.0,
+        "Marque": 100.0,
+        "Modèle": 99.6
+      }
+    },
+    "drift": []
+  }
+]

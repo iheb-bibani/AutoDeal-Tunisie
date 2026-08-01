@@ -1,0 +1,46 @@
+# Versions épinglées volontairement.
+#
+# scikit-learn ET numpy sont épinglés À L'EXACT : le modèle
+# data/models/modele_prix.pkl est entraîné dans un environnement puis chargé
+# dans un autre (ta machine, GitHub Actions, Streamlit Cloud). Le .pkl embarque
+# du code scikit-learn ET un état interne numpy : si une version diffère entre
+# l'entraînement et le chargement, ça va de l'avertissement ("InconsistentVersion")
+# à l'erreur bloquante ("PCG64 is not a known BitGenerator module"). Tous les
+# environnements DOIVENT installer strictement ces versions.
+#
+# Fixé sur 1.7.2 = la version déjà présente sur la machine de dev, pour éviter
+# d'avoir à installer une version plus récente sous Windows/Python 3.10.
+scikit-learn==1.7.2
+numpy==1.26.4
+joblib==1.4.2
+# Interprétation du modèle (section SHAP de l'app). Optionnel : le pipeline
+# tourne sans, mais la section Interprétation reste vide.
+shap
+# Optionnel : active le modèle de Cox dans core/analyser_validation.py (validation
+# stratifiée des opportunités). Sans lui, un repli Mann-Whitney stratifié (scipy,
+# déjà installé via scikit-learn) est utilisé. Décommente si tu veux le Cox :
+lifelines>=0.27
+
+pandas>=2.2
+python-dotenv>=1.0
+requests>=2.31
+
+# Application
+streamlit>=1.40
+plotly>=5.24
+
+# Scraping
+beautifulsoup4>=4.12
+playwright>=1.45
+patchright>=1.45
+
+# Tests
+pytest
+
+# Backend persistant / Auth
+supabase>=2.18,<3
+
+# Benchmark / modèle de prix V2 Data Science
+catboost==1.2.10
+lightgbm==4.6.0
+xgboost==3.1.3
