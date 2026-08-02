@@ -1,7 +1,7 @@
 name: CI
 
-# CI du CODE (séparée du pipeline de données dans scraping.yml).
-# Lance les 66 tests + la cohérence du dépôt à chaque push et pull request.
+# CI du CODE (separee du pipeline de donnees dans scraping.yml).
+# Lance toute la suite pytest + les controles de coherence du depot.
 
 on:
   push:
@@ -14,30 +14,31 @@ concurrency:
 
 jobs:
   tests:
-    name: Tests & cohérence
+    name: Tests & coherence
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Python 3.10
+    steps:
+      - name: Recuperer le depot
+        uses: actions/checkout@v4
+
+      - name: Installer Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
           cache: pip
 
-      - name: Installer les dépendances
+      - name: Installer les dependances
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # Pas d'installation des navigateurs Playwright : les tests n'en ont pas besoin.
 
-      - name: Tests (pytest)
+      - name: Tests pytest
         run: python -m pytest tests/ -q
 
-      - name: Cohérence du dépôt (config ↔ modèle picklé)
+      - name: Coherence du depot (config / modele pickle)
         run: python verifier_sync.py
 
-      - name: Lint (ruff — informatif, ne bloque pas)
+      - name: Lint Ruff (informatif)
         continue-on-error: true
         run: |
           pip install ruff
