@@ -2,6 +2,8 @@ import time
 import random
 import os
 import re
+import csv
+import shutil
 from datetime import datetime, timedelta
 import pandas as pd
 from playwright.sync_api import sync_playwright
@@ -74,6 +76,84 @@ COLONNES_FINALES = [
 ]
 
 
+def _nettoyer_texte_csv(valeur):
+    """Supprime les caractères de contrôle gênants sans perdre le contenu."""
+    if pd.isna(valeur):
+        return pd.NA
+    if not isinstance(valeur, str):
+        return valeur
+    return valeur.replace("\r\n", " ").replace("\r", " ").replace("\n", " ").replace("\x00", " ").strip()
+
+
+def normaliser_schema_csv_tayara(chemin=FICHIER_TAYARA):
+    """Garantit que tayara.csv utilise exactement COLONNES_FINALES.
+
+    L'ancien projet a connu un schéma à 16 colonnes puis un schéma à 19
+    colonnes. Un run pouvait donc ajouter 19 champs à un fichier dont l'en-tête
+    en annonçait 16, ce qui produit l'erreur pandas « Expected 16 fields ... saw
+    19 ». On migre le fichier AVANT tout append et on le réécrit atomiquement.
+    """
+    path = os.fspath(chemin)
+    if not (os.path.exists(path) and os.path.getsize(path) > 0):
+        return
+
+    try:
+        with open(path, "r", encoding="utf-8-sig", newline="") as fh:
+            rows = list(csv.reader(fh, delimiter=";", quotechar='"'))
+    except Exception as exc:
+        raise RuntimeError(f"Impossible de lire {path} pour migration : {exc}") from exc
+
+    if not rows:
+        return
+
+    ancien_header = [str(c).strip() for c in rows[0]]
+    if ancien_header == COLONNES_FINALES and all(len(r) == len(COLONNES_FINALES) for r in rows[1:] if r):
+        return
+
+    print(f"🔧 Migration du schéma Tayara : en-tête {len(ancien_header)} colonnes -> {len(COLONNES_FINALES)} colonnes.")
+    normalisees = []
+    ignores = 0
+
+    for row in rows[1:]:
+        if not row or not any(str(x).strip() for x in row):
+            continue
+
+        # Ligne conforme à l'ancien en-tête : mapping par nom de colonne.
+        if len(row) == len(ancien_header):
+            record = dict(zip(ancien_header, row))
+        # Ligne déjà écrite avec le nouveau schéma, mais sous l'ancien en-tête.
+        elif len(row) == len(COLONNES_FINALES):
+            record = dict(zip(COLONNES_FINALES, row))
+        else:
+            ignores += 1
+            continue
+
+        # Compatibilité des anciens noms utilisés par Tayara.
+        if "Prix_DT" not in record and "Prix" in record:
+            record["Prix_DT"] = record.get("Prix")
+        if "Boite" not in record:
+            record["Boite"] = record.get("Boite_Vitesse", record.get("Transmission"))
+
+        normalisees.append({c: _nettoyer_texte_csv(record.get(c, pd.NA)) for c in COLONNES_FINALES})
+
+    backup = path + ".bak"
+    shutil.copy2(path, backup)
+    tmp = path + ".tmp"
+    pd.DataFrame(normalisees, columns=COLONNES_FINALES).to_csv(
+        tmp, index=False, sep=";", encoding="utf-8-sig",
+        quoting=csv.QUOTE_ALL, lineterminator="\n"
+    )
+
+    # Validation stricte avant remplacement du fichier original.
+    check = pd.read_csv(tmp, sep=";", encoding="utf-8-sig", low_memory=False)
+    if list(check.columns) != COLONNES_FINALES:
+        raise RuntimeError("La migration Tayara a produit un schéma inattendu.")
+    os.replace(tmp, path)
+    print(f"✅ tayara.csv normalisé : {len(check)} lignes. Sauvegarde : {backup}")
+    if ignores:
+        print(f"⚠️ {ignores} ligne(s) irrécupérable(s) ignorée(s) pendant la migration.")
+
+
 def enregistrer_ligne(car, chemin=FICHIER_TAYARA):
     """Ajoute une seule annonce au CSV, tout de suite (au fur et à mesure).
     Ecrit l'en-tête seulement si le fichier n'existe pas encore ou est vide."""
@@ -85,6 +165,7 @@ def enregistrer_ligne(car, chemin=FICHIER_TAYARA):
 
     fichier_existe = os.path.exists(chemin) and os.path.getsize(chemin) > 0
 
+    ligne = {k: _nettoyer_texte_csv(v) for k, v in ligne.items()}
     pd.DataFrame([ligne])[COLONNES_FINALES].to_csv(
         chemin,
         mode="a",
@@ -92,6 +173,8 @@ def enregistrer_ligne(car, chemin=FICHIER_TAYARA):
         index=False,
         sep=";",
         encoding="utf-8-sig",
+        quoting=csv.QUOTE_ALL,
+        lineterminator="\n",
     )
 
 
@@ -109,6 +192,9 @@ def charger_liens_deja_scrapes(chemin=FICHIER_TAYARA):
         return set()
 
 def scrape_tayara():
+    # Corrige automatiquement un ancien tayara.csv 16 colonnes avant tout append.
+    normaliser_schema_csv_tayara()
+
     data_cars = []
     page_num = 1
 
@@ -276,7 +362,17 @@ def scrape_tayara():
             df_final = pd.read_csv(FICHIER_TAYARA, sep=";")
             avant = len(df_final)
             df_final = df_final.drop_duplicates(subset=["Lien"], keep="last")
-            df_final.to_csv(FICHIER_TAYARA, index=False, sep=";", encoding="utf-8-sig")
+            df_final = df_final.reindex(columns=COLONNES_FINALES)
+            for col in df_final.select_dtypes(include="object").columns:
+                df_final[col] = df_final[col].map(_nettoyer_texte_csv)
+            df_final.to_csv(
+                FICHIER_TAYARA, index=False, sep=";", encoding="utf-8-sig",
+                quoting=csv.QUOTE_ALL, lineterminator="\n"
+            )
+            # Relecture immédiate : le scraper échoue ici plutôt que plus tard au quality gate.
+            verif = pd.read_csv(FICHIER_TAYARA, sep=";", encoding="utf-8-sig", low_memory=False)
+            if list(verif.columns) != COLONNES_FINALES:
+                raise RuntimeError(f"Schéma Tayara invalide après écriture : {list(verif.columns)}")
             if avant != len(df_final):
                 print(f"🧹 {avant - len(df_final)} doublons supprimés. Total : {len(df_final)} lignes.")
         except Exception as e:
