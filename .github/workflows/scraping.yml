@@ -21,14 +21,12 @@ jobs:
     timeout-minutes: 350
 
     steps:
-      # fetch-depth: 0 -> sans historique complet, le rebase de la boucle de
-      # publication ne peut pas se raccorder au distant et le push est rejete.
       - name: Recuperer le depot
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Installer Python
+      - name: Installer Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -41,8 +39,6 @@ jobs:
           python -m playwright install --with-deps chromium
           python -m patchright install chromium
 
-      # Patchright tourne en non-headless avec channel="chrome" pour passer
-      # Cloudflare Turnstile : il faut un serveur X virtuel.
       - name: Installer xvfb et Chrome stable
         run: |
           sudo apt-get update
@@ -53,21 +49,14 @@ jobs:
         id: pipeline
         run: xvfb-run -a python main.py
 
-      # Quality gate dynamique : volume vs reference glissante, planchers par
-      # source, completude, plausibilite des prix, doublons. Bloque la
-      # publication de donnees degradees (remplace l'ancien check "< 100").
       - name: Quality gate
         id: verif
         run: python core/quality_gate.py
 
-      # Journalise MdAPE + instantane du marche + drift pour le suivi dans le
-      # temps (alimente la section "Performance dans le temps" du dashboard).
       - name: Suivi des performances
         if: steps.verif.outcome == 'success'
         run: python core/suivi_performance.py
 
-      # Une alerte non partie n'invalide pas la collecte : cette etape ne doit
-      # pas faire echouer le job.
       - name: Envoyer les alertes Telegram
         continue-on-error: true
         env:
@@ -75,11 +64,11 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python utils/send_telegram.py
 
-      - name: Envoyer les alertes personnalisées
+      - name: Envoyer les alertes personnalisees
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -94,12 +83,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Publication differenciee : data/raw est append-only et jamais
-          # incoherent, il part meme en cas d'echec pour ne pas jeter des heures
-          # de collecte. data/processed et data/models ne partent que si tout a
-          # reussi -- et sont restaures avant le rebase, car des fichiers
-          # modifies non stages rendraient l'arbre sale et git rebase refuserait
-          # de tourner.
           if [ "${{ steps.verif.outcome }}" = "success" ]; then
             echo "Pipeline complet : publication de raw + processed + models"
             git add data/raw data/processed data/models
@@ -117,9 +100,6 @@ jobs:
 
           git commit -m "Scraping automatique $(date -u '+%Y-%m-%d %H:%M UTC')"
 
-          # Pendant un rebase les roles sont inverses par rapport a un merge :
-          # 'ours' designe la branche rejouee (le distant), 'theirs' les commits
-          # rejoues (les donnees scrapees). -X ours jetterait le scraping.
           for TENTATIVE in 1 2 3 4 5; do
             echo "Publication, tentative $TENTATIVE/5..."
             git fetch origin main
