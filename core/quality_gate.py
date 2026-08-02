@@ -75,15 +75,15 @@ def _log(niveau: str, msg: str) -> None:
     print(f"{prefix.get(niveau, '')}{msg}")
 
 
-def _lire_csv(chemin: str) -> pd.DataFrame | None:
+def _lire_csv(chemin: str) -> tuple[pd.DataFrame | None, str | None]:
     p = Path(chemin)
     if not p.exists():
-        return None
+        return None, "absent"
     try:
-        return pd.read_csv(p, sep=SEP, encoding=ENC, low_memory=False)
+        return pd.read_csv(p, sep=SEP, encoding=ENC, low_memory=False), None
     except Exception as e:  # fichier illisible
-        _log("warning", f"Lecture impossible de {p.name} : {e}")
-        return None
+        _log("error", f"Lecture impossible de {p.name} : {e}")
+        return None, f"illisible: {e}"
 
 
 def _charger_reference() -> dict:
@@ -119,13 +119,14 @@ def controler() -> int:
     # ---- 1. Volumes par source (data/raw) --------------------------------
     par_source: dict[str, int] = {}
     for nom, chemin in SCRAPERS.items():
-        df = _lire_csv(chemin)
+        df, erreur_lecture = _lire_csv(chemin)
         n = 0 if df is None else len(df)
         par_source[nom] = n
         if nom in SOURCES_DIRECTES:
             if df is None:
-                echecs.append(f"Source directe absente : {nom}")
-                _log("error", f"{nom} : fichier absent")
+                raison = "fichier absent" if erreur_lecture == "absent" else "fichier illisible/corrompu"
+                echecs.append(f"Source directe indisponible : {nom} ({raison})")
+                _log("error", f"{nom} : {raison}")
             elif n < PLANCHER_SOURCE_DIRECTE:
                 echecs.append(f"{nom} : {n} annonces (< {PLANCHER_SOURCE_DIRECTE})")
                 _log("error", f"{nom} : seulement {n} annonces (plancher {PLANCHER_SOURCE_DIRECTE})")
@@ -139,7 +140,7 @@ def controler() -> int:
                 _log("ok", f"{nom} (optionnelle) : {n} annonces")
 
     # ---- 2. Fichier scoré final ------------------------------------------
-    scored = _lire_csv(PROCESSED_FILES.get("scored", ""))
+    scored, scored_error = _lire_csv(PROCESSED_FILES.get("scored", ""))
     if scored is None or scored.empty:
         _log("error", "Fichier scoré introuvable ou vide — publication bloquée.")
         print("=" * 64)
