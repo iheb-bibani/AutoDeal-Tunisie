@@ -338,5 +338,37 @@
       }
     },
     "drift": []
+  },
+  {
+    "date": "2026-08-08T00:04:55+00:00",
+    "mdape_global": 9.67,
+    "mdape_par_tranche": {
+      "< 15k": 20.43,
+      "15-25k": 11.81,
+      "25-35k": 8.76,
+      "35-50k": 7.19,
+      "50-75k": 8.75,
+      "75-100k": 9.29,
+      "100k +": 13.16
+    },
+    "instantane": {
+      "n": 4047,
+      "prix_median": 53500.0,
+      "age_median": 7.0,
+      "km_median": 109954.0,
+      "mix_sources": {
+        "automobile.tn": 63.8,
+        "tayara.tn": 27.8,
+        "autocentral.tn (facebook)": 6.7,
+        "AutoMax": 0.9,
+        "sayyaratn.com": 0.8
+      },
+      "completude": {
+        "Prix": 100.0,
+        "Marque": 100.0,
+        "Modèle": 99.5
+      }
+    },
+    "drift": []
   }
 ]
