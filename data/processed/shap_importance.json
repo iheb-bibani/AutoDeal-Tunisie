@@ -4,28 +4,28 @@
   "echelle": "log-prix",
   "importances": [
     {
-      "feature": "Cylindree",
-      "pct": 28.0
+      "feature": "Modèle",
+      "pct": 26.8
     },
     {
-      "feature": "Modèle",
-      "pct": 25.9
+      "feature": "Cylindree",
+      "pct": 26.7
     },
     {
       "feature": "Kilométrage",
-      "pct": 10.2
+      "pct": 13.5
     },
     {
       "feature": "Km_Par_An",
-      "pct": 9.2
+      "pct": 9.8
     },
     {
       "feature": "Age_Carre",
-      "pct": 9.1
+      "pct": 7.4
     },
     {
       "feature": "Age_Vehicule",
-      "pct": 7.4
+      "pct": 6.2
     },
     {
       "feature": "Marque",
@@ -33,15 +33,15 @@
     },
     {
       "feature": "Energie",
-      "pct": 3.5
+      "pct": 3.4
     },
     {
       "feature": "Log_Kilometrage",
-      "pct": 1.3
+      "pct": 1.0
     },
     {
       "feature": "Boite_Vitesse",
-      "pct": 1.0
+      "pct": 0.9
     },
     {
       "feature": "Puissance_Fiscale",
