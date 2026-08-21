@@ -1,27 +1,23 @@
 # AutoDeal — profils, abonnements et accès
 
-## 1. Appliquer la migration Supabase
+Pour une installation neuve, exécute **`supabase/schema.sql`**. Il contient le
+schéma complet actuel. Les migrations sous `supabase/migrations/` servent à la
+mise à niveau d'anciens projets.
 
-Dans Supabase > SQL Editor, exécuter le fichier :
+## Rôles
 
-`supabase/migrations/20260802_saas_roles_subscriptions.sql`
+AutoDeal distingue le **rôle métier** de la **formule** :
 
-Il crée :
-- `profiles` : rôle métier (`user`, `samsar`, `dealer`, `admin`)
-- `subscriptions` : plan et statut d'abonnement
-- les politiques RLS en lecture
-- un trigger d'inscription
+| Profil | `role` | Formule initiale | Statut initial |
+|---|---|---|---|
+| Particulier | `user` | `free` | `active` |
+| Samsar | `samsar` | `pro` | `trialing` (14 j) |
+| Concessionnaire | `dealer` | `business` | `trialing` (14 j) |
+| Administrateur | `admin` | accès total | attribution manuelle |
 
-Les nouveaux comptes obtiennent :
-- Particulier -> `role=user`, `plan=free`, `status=active`
-- Samsar -> `role=samsar`, `plan=pro`, `status=trialing`, essai 14 jours
-- Concessionnaire -> `role=dealer`, `plan=business`, `status=trialing`, essai 14 jours
+Le rôle `admin` n'est jamais proposé au signup.
 
-`admin` n'est jamais sélectionnable à l'inscription.
-
-## 2. Donner le rôle admin à un compte
-
-À faire uniquement manuellement dans le SQL Editor avec l'adresse réelle du compte :
+## Donner le rôle admin
 
 ```sql
 update public.profiles p
@@ -31,13 +27,14 @@ where p.user_id = u.id
   and u.email = 'VOTRE_EMAIL';
 ```
 
-## 3. Modifier manuellement un abonnement pendant les tests
+## Modifier un abonnement pendant les tests
 
 Samsar Pro :
 
 ```sql
 update public.subscriptions s
-set plan='pro', status='active', updated_at=now()
+set plan='pro', status='active',
+    current_period_end=now() + interval '30 days', updated_at=now()
 from auth.users u
 where s.user_id=u.id and u.email='EMAIL_DU_COMPTE';
 ```
@@ -46,25 +43,37 @@ Concessionnaire Business :
 
 ```sql
 update public.subscriptions s
-set plan='business', status='active', updated_at=now()
+set plan='business', status='active',
+    current_period_end=now() + interval '30 days', updated_at=now()
 from auth.users u
 where s.user_id=u.id and u.email='EMAIL_DU_COMPTE';
 ```
 
-## 4. Paiement
+## Paiement
 
-Le module `services/payment_provider.py` est volontairement désactivé.
-AutoDeal n'enregistre aucun numéro de carte, CVV ou donnée bancaire.
-Lorsqu'un compte marchand sera disponible, `start_checkout()` devra créer une
-session chez le prestataire et retourner uniquement son URL de checkout hébergé.
+`services/payment_provider.py` sait préparer un checkout **Konnect** lorsque les
+secrets marchand sont configurés. AutoDeal n'enregistre jamais PAN/CVV : la
+carte est saisie chez le prestataire.
 
-Les prix préparés sont :
+Tarifs préparés :
+
 - Gratuit : 0 DT
 - Pro Samsar : 29 DT/mois ou 299 DT/an
 - Business Concessionnaire : 79 DT/mois ou 799 DT/an
 - Business+ : 149 DT/mois ou 1499 DT/an
 
-## 5. Sécurité
+Le schéma contient `payment_transactions` et `subscription_notifications`.
+`utils/subscription_maintenance.py` expire les périodes payées arrivées à terme
+et distribue les notifications backend. L'activation effective d'un paiement
+dépend néanmoins d'un compte marchand et d'un flux de confirmation/webhook
+réellement configurés : ne considère pas un bouton de checkout comme une preuve
+de paiement.
 
-Ne jamais mettre une service-role/secret key dans le code ou dans les secrets
-accessibles au front. La service-role reste réservée aux GitHub Actions/backend.
+## Sécurité
+
+- Streamlit : `SUPABASE_URL` + `SUPABASE_PUBLISHABLE_KEY` uniquement.
+- Backend/GitHub Actions : `SUPABASE_SECRET_KEY` (ou ancien
+  `SUPABASE_SERVICE_ROLE_KEY`).
+- RLS activée sur les tables utilisateur.
+- Les rôles et abonnements ne sont pas modifiables par le client public.
+- Les requêtes utilisateur filtrent explicitement sur `user_id` en plus des RLS.
