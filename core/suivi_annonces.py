@@ -1,38 +1,15 @@
 """
 suivi_annonces.py
-Suit chaque annonce dans le temps : quand elle est apparue, quand elle a
-disparu, combien de temps elle est restée en ligne.
+Suit chaque annonce dans le temps : première/dernière observation, variations
+de prix, disparition et réapparition.
 
-C'est la seule source de vérité du projet. Tout le reste (prix théorique,
-score d'opportunité, liquidité) est une prédiction sur des prix DEMANDÉS.
-Ici on observe enfin un fait : l'annonce a disparu du site.
+Une disparition est un proxy d'écoulement, jamais une vente certifiée. Une
+annonce peut être vendue, retirée, expirée ou supprimée.
 
-Pourquoi pas de requêtes HTTP
------------------------------
-La version précédente (utils/tracker_ventes.py) vérifiait chaque annonce par
-une requête HEAD : plusieurs milliers de requêtes par nuit, bloquées par
-Cloudflare sur automobile.tn, et un simple incident réseau suffisait à
-marquer une annonce « vendue » définitivement.
-
-Les scrapers parcourent déjà l'intégralité du catalogue de chaque site à
-chaque exécution. Une annonce présente hier et absente aujourd'hui a donc
-été retirée — l'information est déjà là, gratuitement et sans risque de
-faux positif réseau.
-
-Ce que « disparue » veut dire, et ne veut pas dire
---------------------------------------------------
-Une annonce disparue N'EST PAS forcément une vente. Elle peut avoir été
-retirée, avoir expiré, ou été supprimée par le vendeur. Le délai avant
-disparition est un *proxy* de vitesse d'écoulement, à traiter comme tel :
-il est utile pour comparer des modèles entre eux, pas pour affirmer qu'une
-voiture précise s'est vendue.
-
-Garde-fou important
--------------------
-Si un scraping échoue à mi-parcours, des centaines d'annonces encore en
-ligne sembleraient avoir disparu, et cette erreur serait enregistrée
-définitivement. Le script refuse donc de conclure quoi que ce soit quand le
-volume du jour s'effondre par rapport à la dernière exécution.
+Le point critique est la qualité du scraping : une source qui tombe ne doit
+jamais transformer toutes ses annonces en fausses « disparitions ». Les
+garde-fous sont donc appliqués à deux niveaux : volume global ET volume par
+source.
 """
 
 import os
@@ -49,8 +26,9 @@ from config import PROCESSED_FILES
 FICHIER_SUIVI = "data/processed/suivi_annonces.csv"
 FICHIER_ALERTES = "data/processed/alertes_bonnes_affaires.csv"
 
-# En dessous de cette proportion du volume précédent, on considère que le
-# scraping du jour est incomplet et on ne marque AUCUNE disparition.
+# Si le catalogue courant tombe sous 60 % du volume actif précédent, on
+# considère le scraping comme incomplet. Ce seuil s'applique au total et à
+# chaque source indépendamment.
 SEUIL_VOLUME_SUSPECT = 0.60
 
 COLONNES_SNAPSHOT = ["Source", "Marque", "Modèle", "Année", "Localisation"]
@@ -59,9 +37,6 @@ COLONNES_SNAPSHOT = ["Source", "Marque", "Modèle", "Année", "Localisation"]
 def charger_suivi():
     if os.path.exists(FICHIER_SUIVI):
         suivi = pd.read_csv(FICHIER_SUIVI, sep=";", encoding="utf-8-sig")
-        # Tant qu'aucune annonce n'a disparu, Date_Disparition ne contient que
-        # des valeurs vides et pandas la relit en float64 -- qui refuse ensuite
-        # d'accueillir une date. On force le type texte dès le chargement.
         for col in ["Date_Disparition", "Premiere_Vue", "Derniere_Vue", "Statut"]:
             if col in suivi.columns:
                 suivi[col] = suivi[col].astype(object)
@@ -71,6 +46,35 @@ def charger_suivi():
         "Prix_Initial", "Prix_Dernier", "Premiere_Vue", "Derniere_Vue",
         "Statut", "Date_Disparition", "Jours_En_Ligne", "Nb_Reapparitions",
     ])
+
+
+def _sources_suspectes(suivi: pd.DataFrame, merged: pd.DataFrame) -> set[str]:
+    """Détecte les sources dont le scraping courant est probablement partiel.
+
+    Le contrôle global seul est insuffisant : si une source représentant 25 %
+    du marché tombe totalement, le volume global peut rester au-dessus de 60 %
+    et ses annonces seraient alors toutes marquées disparues.
+    """
+    if suivi.empty or "Source" not in suivi.columns or "Source" not in merged.columns:
+        return set()
+
+    actifs = suivi[suivi["Statut"] == "Active"].copy()
+    if actifs.empty:
+        return set()
+
+    avant = actifs["Source"].fillna("<inconnue>").astype(str).value_counts()
+    courant = merged["Source"].fillna("<inconnue>").astype(str).value_counts()
+    suspectes: set[str] = set()
+    for source, n_avant in avant.items():
+        n_courant = int(courant.get(source, 0))
+        if n_avant > 0 and n_courant < n_avant * SEUIL_VOLUME_SUSPECT:
+            suspectes.add(str(source))
+            print(
+                f"⚠️  Source {source!r} : {n_courant} annonce(s) aujourd'hui vs "
+                f"{n_avant} active(s) auparavant. Les disparitions de cette source "
+                "sont gelées pour ce run."
+            )
+    return suspectes
 
 
 def mettre_a_jour():
@@ -84,15 +88,19 @@ def mettre_a_jour():
     suivi = charger_suivi()
     connus = set(suivi["Lien"].astype(str)) if len(suivi) else set()
 
-    # ---- Garde-fou : scraping manifestement incomplet -------------------
+    # ---- Garde-fous anti faux-positifs -----------------------------------
     actifs_avant = int((suivi["Statut"] == "Active").sum()) if len(suivi) else 0
-    scraping_suspect = False
-    if actifs_avant > 0 and len(liens_du_jour) < actifs_avant * SEUIL_VOLUME_SUSPECT:
-        scraping_suspect = True
-        print(f"⚠️  Volume du jour ({len(liens_du_jour)}) très inférieur aux "
-              f"{actifs_avant} annonces actives connues : scraping probablement "
-              "incomplet. Les disparitions ne seront PAS enregistrées cette fois "
-              "(les nouvelles annonces le sont normalement).")
+    scraping_suspect = (
+        actifs_avant > 0
+        and len(liens_du_jour) < actifs_avant * SEUIL_VOLUME_SUSPECT
+    )
+    if scraping_suspect:
+        print(
+            f"⚠️  Volume global du jour ({len(liens_du_jour)}) très inférieur aux "
+            f"{actifs_avant} annonces actives connues : aucune disparition ne sera "
+            "enregistrée sur ce run."
+        )
+    sources_suspectes = _sources_suspectes(suivi, merged)
 
     # ---- Annonces déjà suivies et revues aujourd'hui --------------------
     if len(suivi):
@@ -102,28 +110,38 @@ def mettre_a_jour():
         suivi.loc[vue, "Prix_Dernier"] = (
             suivi.loc[vue, "Lien"].astype(str).map(prix_du_jour).values
         )
-        # Une annonce peut réapparaître (republiée par le vendeur, ou absente
-        # d'un scraping partiel) : on la remet active et on compte l'événement.
+
         revenues = vue & (suivi["Statut"] == "Disparue")
         if revenues.sum():
             suivi.loc[revenues, "Statut"] = "Active"
             suivi.loc[revenues, "Date_Disparition"] = pd.NA
             suivi.loc[revenues, "Jours_En_Ligne"] = pd.NA
             suivi.loc[revenues, "Nb_Reapparitions"] = (
-                pd.to_numeric(suivi.loc[revenues, "Nb_Reapparitions"], errors="coerce").fillna(0) + 1
+                pd.to_numeric(
+                    suivi.loc[revenues, "Nb_Reapparitions"], errors="coerce"
+                ).fillna(0) + 1
             )
             print(f"↩️  {int(revenues.sum())} annonce(s) réapparue(s) — remises en actif.")
 
     # ---- Disparitions ---------------------------------------------------
     nb_disparues = 0
     if len(suivi) and not scraping_suspect:
-        disparues = (~suivi["Lien"].astype(str).isin(liens_du_jour)) & (suivi["Statut"] == "Active")
+        disparues = (
+            ~suivi["Lien"].astype(str).isin(liens_du_jour)
+            & (suivi["Statut"] == "Active")
+        )
+        if sources_suspectes and "Source" in suivi.columns:
+            source_norm = suivi["Source"].fillna("<inconnue>").astype(str)
+            disparues &= ~source_norm.isin(sources_suspectes)
+
         if disparues.sum():
             suivi.loc[disparues, "Statut"] = "Disparue"
             suivi.loc[disparues, "Date_Disparition"] = aujourd_hui
             duree = (
                 pd.to_datetime(aujourd_hui)
-                - pd.to_datetime(suivi.loc[disparues, "Premiere_Vue"], errors="coerce")
+                - pd.to_datetime(
+                    suivi.loc[disparues, "Premiere_Vue"], errors="coerce"
+                )
             ).dt.days
             suivi.loc[disparues, "Jours_En_Ligne"] = duree.values
             nb_disparues = int(disparues.sum())
@@ -146,25 +164,21 @@ def mettre_a_jour():
             ajout[col] = nouveaux[col].values if col in nouveaux.columns else pd.NA
         suivi = pd.concat([suivi, ajout], ignore_index=True)
 
-    # ---- Marquage des annonces signalées comme opportunités -------------
-    # C'est le cœur de la validation : on saura si les annonces que le
-    # système a signalées disparaissent plus vite que les autres.
+    # ---- Marquage historique des opportunités ---------------------------
     if os.path.exists(FICHIER_ALERTES):
         try:
             alertes = pd.read_csv(FICHIER_ALERTES, sep=";", encoding="utf-8-sig")
             if len(alertes) and "Lien" in alertes.columns:
                 if "Etait_Opportunite" not in suivi.columns:
                     suivi["Etait_Opportunite"] = False
-                est_deal = suivi["Lien"].astype(str).isin(alertes["Lien"].astype(str))
+                est_deal = suivi["Lien"].astype(str).isin(
+                    alertes["Lien"].astype(str)
+                )
                 suivi.loc[est_deal, "Etait_Opportunite"] = True
         except (pd.errors.EmptyDataError, KeyError):
             pass
     if "Etait_Opportunite" not in suivi.columns:
         suivi["Etait_Opportunite"] = False
-    # Après un aller-retour CSV, la colonne peut revenir en chaînes "True"/
-    # "False" : `.astype(bool)` transformerait alors "False" (chaîne non vide)
-    # en True. On parse par le texte, comme send_telegram.py le fait pour
-    # Alerte_Telegram.
     suivi["Etait_Opportunite"] = (
         suivi["Etait_Opportunite"]
         .astype(str).str.strip().str.lower()
@@ -179,14 +193,23 @@ def mettre_a_jour():
     print("-" * 30)
     print(f"Nouvelles annonces suivies : {len(nouveaux)}")
     print(f"Disparues aujourd'hui      : {nb_disparues}")
-    print(f"Total suivi                : {len(suivi)} ({actives} actives, {disparues_total} disparues)")
-    mesurables = pd.to_numeric(suivi["Jours_En_Ligne"], errors="coerce").dropna()
+    print(
+        f"Total suivi                : {len(suivi)} "
+        f"({actives} actives, {disparues_total} disparues)"
+    )
+    mesurables = pd.to_numeric(
+        suivi["Jours_En_Ligne"], errors="coerce"
+    ).dropna()
     if len(mesurables) >= 10:
-        print(f"Durée médiane en ligne     : {mesurables.median():.0f} jours "
-              f"(sur {len(mesurables)} annonces disparues)")
+        print(
+            f"Durée médiane en ligne     : {mesurables.median():.0f} jours "
+            f"(sur {len(mesurables)} annonces disparues)"
+        )
     else:
-        print("Durée médiane en ligne     : pas encore assez d'historique "
-              "(il faut plusieurs jours de collecte).")
+        print(
+            "Durée médiane en ligne     : pas encore assez d'historique "
+            "(il faut plusieurs jours de collecte)."
+        )
     print(f"Fichier : {FICHIER_SUIVI}")
     print("-" * 30)
 
