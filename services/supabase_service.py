@@ -1,8 +1,12 @@
 """Couche Supabase optionnelle pour AutoDeal Tunisie.
 
 Le client utilisateur emploie la publishable/anon key + le JWT de la session.
-Le client admin (service role/secret key) est réservé aux scripts CI et ne doit
-jamais être construit dans l'interface Streamlit avec une clé exposée au client.
+Le client admin (service role/secret key) est réservé aux scripts CI/backend.
+
+Les politiques RLS restent la barrière de sécurité principale. Les requêtes
+utilisateur filtrent aussi explicitement par ``user_id`` : cela rend le contrat
+plus clair et évite de dépendre d'un ``limit(1)`` implicite pour les profils,
+abonnements et préférences.
 """
 from __future__ import annotations
 
@@ -22,6 +26,7 @@ def _secret(name: str) -> str | None:
         return value
     try:
         import streamlit as st
+
         value = st.secrets.get(name)
         return str(value) if value else None
     except Exception:
@@ -29,19 +34,27 @@ def _secret(name: str) -> str | None:
 
 
 def is_configured() -> bool:
-    return bool(_secret("SUPABASE_URL") and (_secret("SUPABASE_PUBLISHABLE_KEY") or _secret("SUPABASE_ANON_KEY")))
+    return bool(
+        _secret("SUPABASE_URL")
+        and (_secret("SUPABASE_PUBLISHABLE_KEY") or _secret("SUPABASE_ANON_KEY"))
+    )
 
 
 def _public_key() -> str | None:
     return _secret("SUPABASE_PUBLISHABLE_KEY") or _secret("SUPABASE_ANON_KEY")
 
 
-def create_public_client(access_token: str | None = None, refresh_token: str | None = None):
+def create_public_client(
+    access_token: str | None = None,
+    refresh_token: str | None = None,
+):
     if create_client is None:
         raise RuntimeError("Le package 'supabase' n'est pas installé.")
     url, key = _secret("SUPABASE_URL"), _public_key()
     if not url or not key:
-        raise RuntimeError("SUPABASE_URL et SUPABASE_PUBLISHABLE_KEY/ANON_KEY sont requis.")
+        raise RuntimeError(
+            "SUPABASE_URL et SUPABASE_PUBLISHABLE_KEY/ANON_KEY sont requis."
+        )
     client = create_client(url, key)
     if access_token and refresh_token:
         client.auth.set_session(access_token, refresh_token)
@@ -49,17 +62,24 @@ def create_public_client(access_token: str | None = None, refresh_token: str | N
 
 
 def create_admin_client():
-    """Client CI uniquement. La secret/service-role key contourne les RLS."""
+    """Client backend uniquement. La secret/service-role key contourne les RLS."""
     if create_client is None:
         raise RuntimeError("Le package 'supabase' n'est pas installé.")
     url = os.getenv("SUPABASE_URL")
     key = os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
     if not url or not key:
-        raise RuntimeError("SUPABASE_URL et SUPABASE_SECRET_KEY/SERVICE_ROLE_KEY sont requis côté CI.")
+        raise RuntimeError(
+            "SUPABASE_URL et SUPABASE_SECRET_KEY/SERVICE_ROLE_KEY sont requis côté backend."
+        )
     return create_client(url, key)
 
 
-def sign_up(email: str, password: str, full_name: str | None = None, account_role: str = "user") -> dict[str, Any]:
+def sign_up(
+    email: str,
+    password: str,
+    full_name: str | None = None,
+    account_role: str = "user",
+) -> dict[str, Any]:
     client = create_public_client()
     payload = {"email": email.strip(), "password": password}
     role = account_role if account_role in {"user", "samsar", "dealer"} else "user"
@@ -81,7 +101,9 @@ def sign_up(email: str, password: str, full_name: str | None = None, account_rol
 
 def sign_in(email: str, password: str) -> dict[str, Any]:
     client = create_public_client()
-    response = client.auth.sign_in_with_password({"email": email.strip(), "password": password})
+    response = client.auth.sign_in_with_password(
+        {"email": email.strip(), "password": password}
+    )
     session = response.session
     user = response.user
     return {
@@ -120,19 +142,45 @@ def user_client_from_state(state: dict[str, Any]):
     return restored["client"]
 
 
+def _current_user_id(client) -> str:
+    response = client.auth.get_user()
+    user = getattr(response, "user", None)
+    user_id = getattr(user, "id", None)
+    if not user_id:
+        raise RuntimeError("Session Supabase sans utilisateur authentifié.")
+    return str(user_id)
+
+
 def sign_out(state: dict[str, Any]) -> None:
     try:
         client = user_client_from_state(state)
-        # Local suffit pour l'UX Streamlit ; évite de déconnecter tous les appareils.
         client.auth.sign_out({"scope": "local"})
     except Exception:
         pass
-    for key in ("sb_access_token", "sb_refresh_token", "sb_user_id", "sb_user_email", "favorite_links", "sb_role", "sb_plan", "sb_subscription_status"):
+    for key in (
+        "sb_access_token",
+        "sb_refresh_token",
+        "sb_user_id",
+        "sb_user_email",
+        "favorite_links",
+        "sb_role",
+        "sb_plan",
+        "sb_subscription_status",
+    ):
         state.pop(key, None)
 
 
 def list_alerts(client) -> list[dict[str, Any]]:
-    return client.table("alerts").select("*").order("created_at", desc=True).execute().data or []
+    uid = _current_user_id(client)
+    return (
+        client.table("alerts")
+        .select("*")
+        .eq("user_id", uid)
+        .order("created_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
 
 
 def create_alert(client, payload: dict[str, Any]) -> dict[str, Any]:
@@ -140,32 +188,77 @@ def create_alert(client, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def update_alert(client, alert_id: str, payload: dict[str, Any]) -> None:
-    client.table("alerts").update(payload).eq("id", alert_id).execute()
+    uid = _current_user_id(client)
+    (
+        client.table("alerts")
+        .update(payload)
+        .eq("id", alert_id)
+        .eq("user_id", uid)
+        .execute()
+    )
 
 
 def delete_alert(client, alert_id: str) -> None:
-    client.table("alerts").delete().eq("id", alert_id).execute()
+    uid = _current_user_id(client)
+    client.table("alerts").delete().eq("id", alert_id).eq("user_id", uid).execute()
 
 
 def get_notification_settings(client) -> dict[str, Any] | None:
-    data = client.table("notification_settings").select("*").limit(1).execute().data or []
+    uid = _current_user_id(client)
+    data = (
+        client.table("notification_settings")
+        .select("*")
+        .eq("user_id", uid)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
     return data[0] if data else None
 
 
 def save_notification_settings(client, payload: dict[str, Any]) -> None:
-    client.table("notification_settings").upsert(payload, on_conflict="user_id").execute()
+    uid = _current_user_id(client)
+    safe_payload = {**payload, "user_id": uid}
+    (
+        client.table("notification_settings")
+        .upsert(safe_payload, on_conflict="user_id")
+        .execute()
+    )
 
 
 def list_favorites(client) -> list[dict[str, Any]]:
-    return client.table("favorites").select("*").order("created_at", desc=True).execute().data or []
+    uid = _current_user_id(client)
+    return (
+        client.table("favorites")
+        .select("*")
+        .eq("user_id", uid)
+        .order("created_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
 
 
 def add_favorite(client, payload: dict[str, Any]) -> None:
-    client.table("favorites").upsert(payload, on_conflict="user_id,listing_url").execute()
+    uid = _current_user_id(client)
+    safe_payload = {**payload, "user_id": uid}
+    (
+        client.table("favorites")
+        .upsert(safe_payload, on_conflict="user_id,listing_url")
+        .execute()
+    )
 
 
 def remove_favorite(client, listing_url: str) -> None:
-    client.table("favorites").delete().eq("listing_url", listing_url).execute()
+    uid = _current_user_id(client)
+    (
+        client.table("favorites")
+        .delete()
+        .eq("listing_url", listing_url)
+        .eq("user_id", uid)
+        .execute()
+    )
 
 
 def request_password_reset(email: str, redirect_to: str | None = None) -> None:
@@ -179,7 +272,9 @@ def request_password_reset(email: str, redirect_to: str | None = None) -> None:
 
 def verify_recovery_code(email: str, token: str) -> dict[str, Any]:
     client = create_public_client()
-    response = client.auth.verify_otp({"email": email.strip(), "token": token.strip(), "type": "recovery"})
+    response = client.auth.verify_otp(
+        {"email": email.strip(), "token": token.strip(), "type": "recovery"}
+    )
     session = response.session
     user = response.user
     return {
@@ -196,24 +291,48 @@ def update_password_from_state(state: dict[str, Any], new_password: str) -> None
 
 
 def get_profile(client) -> dict[str, Any] | None:
-    data = client.table("profiles").select("*").limit(1).execute().data or []
+    uid = _current_user_id(client)
+    data = (
+        client.table("profiles")
+        .select("*")
+        .eq("user_id", uid)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
     return data[0] if data else None
 
 
 def get_subscription(client) -> dict[str, Any] | None:
-    data = client.table("subscriptions").select("*").limit(1).execute().data or []
+    uid = _current_user_id(client)
+    data = (
+        client.table("subscriptions")
+        .select("*")
+        .eq("user_id", uid)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
     return data[0] if data else None
 
 
 def current_access_context(state: dict[str, Any]) -> dict[str, Any]:
     if not state.get("sb_access_token") or not state.get("sb_refresh_token"):
-        return {"role": "guest", "plan": "free", "subscription_status": "inactive"}
+        return {
+            "role": "guest",
+            "plan": "free",
+            "subscription_status": "inactive",
+        }
     client = user_client_from_state(state)
     profile = get_profile(client) or {}
     subscription = get_subscription(client) or {}
     role = profile.get("role") or "user"
     plan = subscription.get("plan") or "free"
-    status = subscription.get("status") or ("active" if plan == "free" else "inactive")
+    status = subscription.get("status") or (
+        "active" if plan == "free" else "inactive"
+    )
     state["sb_role"] = role
     state["sb_plan"] = plan
     state["sb_subscription_status"] = status
@@ -227,7 +346,9 @@ def current_access_context(state: dict[str, Any]) -> dict[str, Any]:
         "trial_end": subscription.get("trial_end"),
         "current_period_start": subscription.get("current_period_start"),
         "current_period_end": subscription.get("current_period_end"),
-        "cancel_at_period_end": bool(subscription.get("cancel_at_period_end", False)),
+        "cancel_at_period_end": bool(
+            subscription.get("cancel_at_period_end", False)
+        ),
         "billing_cycle": subscription.get("billing_cycle"),
         "payment_provider": subscription.get("payment_provider"),
         "last_payment_status": subscription.get("last_payment_status"),
@@ -246,7 +367,10 @@ def current_user_profile(state: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(user.id),
         "email": user.email,
-        "full_name": profile.get("full_name") or metadata.get("full_name") or metadata.get("name") or "",
+        "full_name": profile.get("full_name")
+        or metadata.get("full_name")
+        or metadata.get("name")
+        or "",
         "role": profile.get("role") or "user",
         "plan": subscription.get("plan") or "free",
         "subscription_status": subscription.get("status") or "active",
