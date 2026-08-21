@@ -1,7 +1,8 @@
 name: CI
 
-# CI du CODE (separee du pipeline de donnees dans scraping.yml).
-# Lance toute la suite pytest + les controles de coherence du depot.
+# CI du CODE (séparée du pipeline de données dans scraping.yml).
+# Lance la compilation Python, toute la suite pytest et les contrôles de
+# cohérence du dépôt.
 
 on:
   push:
@@ -14,11 +15,11 @@ concurrency:
 
 jobs:
   tests:
-    name: Tests & coherence
+    name: Tests & cohérence
     runs-on: ubuntu-latest
 
     steps:
-      - name: Recuperer le depot
+      - name: Récupérer le dépôt
         uses: actions/checkout@v4
 
       - name: Installer Python 3.11
@@ -27,15 +28,19 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Installer les dependances
+      - name: Installer les dépendances
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Vérifier la syntaxe Python
+        run: |
+          python -m compileall -q app.py product_views.py config.py logger.py core services scrapers utils tests
+
       - name: Tests pytest
         run: python -m pytest tests/ -q
 
-      - name: Coherence du depot (config / modele pickle)
+      - name: Cohérence du dépôt (config / modèle / contrats)
         run: python verifier_sync.py
 
       - name: Lint Ruff (informatif)
