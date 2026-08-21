@@ -1,5 +1,7 @@
--- AutoDeal Tunisie — schéma Supabase
--- À exécuter une seule fois dans Supabase > SQL Editor.
+-- AutoDeal Tunisie — schéma Supabase canonique
+-- À exécuter dans Supabase > SQL Editor pour une installation neuve.
+-- Le script est idempotent et inclut Auth/RLS, profils, abonnements, alertes,
+-- favoris ainsi que les tables nécessaires au suivi des paiements.
 
 create extension if not exists pgcrypto;
 
@@ -58,7 +60,6 @@ alter table public.alerts enable row level security;
 alter table public.favorites enable row level security;
 alter table public.alert_deliveries enable row level security;
 
--- L'utilisateur ne voit et ne modifie que ses propres lignes.
 drop policy if exists "own notification settings" on public.notification_settings;
 create policy "own notification settings" on public.notification_settings
 for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
@@ -89,7 +90,7 @@ create table if not exists public.profiles (
 create table if not exists public.subscriptions (
   user_id uuid primary key references auth.users(id) on delete cascade,
   plan text not null default 'free' check (plan in ('free', 'pro', 'business', 'business_plus')),
-  status text not null default 'active' check (status in ('active', 'trialing', 'past_due', 'cancelled', 'inactive')),
+  status text not null default 'active',
   billing_cycle text check (billing_cycle in ('monthly', 'yearly')),
   currency text not null default 'TND',
   provider text,
@@ -104,6 +105,20 @@ create table if not exists public.subscriptions (
   updated_at timestamptz not null default now()
 );
 
+-- Colonnes backend de paiement. `provider` est conservé pour compatibilité
+-- historique ; `payment_provider` est la colonne utilisée par le code actuel.
+alter table public.subscriptions
+  add column if not exists payment_provider text,
+  add column if not exists last_payment_status text,
+  add column if not exists last_payment_at timestamptz,
+  add column if not exists next_payment_due_at timestamptz,
+  add column if not exists failed_payment_count integer not null default 0;
+
+alter table public.subscriptions drop constraint if exists subscriptions_status_check;
+alter table public.subscriptions
+  add constraint subscriptions_status_check
+  check (status in ('active','trialing','past_due','cancelled','inactive','expired','unpaid'));
+
 alter table public.profiles enable row level security;
 alter table public.subscriptions enable row level security;
 
@@ -115,10 +130,62 @@ drop policy if exists "own subscription read" on public.subscriptions;
 create policy "own subscription read" on public.subscriptions
 for select using (auth.uid() = user_id);
 
--- Pas de policy UPDATE/INSERT côté client : rôle et abonnement ne sont pas
--- modifiables depuis Streamlit. Les changements sont effectués par le backend
--- marchand ou manuellement par l'administrateur avec la service-role key.
+-- Aucun UPDATE/INSERT côté client pour les rôles/abonnements : seuls le
+-- backend marchand ou un administrateur Supabase peuvent les modifier.
 
+create table if not exists public.payment_transactions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  provider text not null,
+  payment_ref text not null unique,
+  order_id text,
+  plan text not null check (plan in ('pro','business','business_plus')),
+  billing_cycle text not null check (billing_cycle in ('monthly','yearly')),
+  currency text not null default 'TND',
+  amount_tnd numeric(12,3),
+  status text not null default 'pending'
+    check (status in ('pending','paid','failed','expired','refunded','cancelled')),
+  raw_payload jsonb,
+  created_at timestamptz not null default now(),
+  paid_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.subscription_notifications (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  kind text not null
+    check (kind in ('payment_failed','subscription_expired','payment_success','renewal_due')),
+  status text not null default 'pending'
+    check (status in ('pending','sent','failed')),
+  channel text not null default 'auto'
+    check (channel in ('auto','email','telegram')),
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  sent_at timestamptz
+);
+
+alter table public.payment_transactions enable row level security;
+alter table public.subscription_notifications enable row level security;
+
+drop policy if exists "own payment history read" on public.payment_transactions;
+create policy "own payment history read" on public.payment_transactions
+for select using (auth.uid() = user_id);
+
+drop policy if exists "own subscription notifications read" on public.subscription_notifications;
+create policy "own subscription notifications read" on public.subscription_notifications
+for select using (auth.uid() = user_id);
+
+create index if not exists idx_payment_transactions_user
+  on public.payment_transactions(user_id, created_at desc);
+create index if not exists idx_subscription_notifications_pending
+  on public.subscription_notifications(status, created_at);
+create index if not exists idx_subscriptions_due
+  on public.subscriptions(status, current_period_end);
+
+-- -------------------------------------------------------------------------
+-- Création automatique du profil et de l'abonnement lors d'un signup Auth
+-- -------------------------------------------------------------------------
 create or replace function public.handle_autodeal_new_user()
 returns trigger
 language plpgsql
@@ -144,14 +211,22 @@ begin
   on conflict (user_id) do nothing;
 
   if requested_role = 'samsar' then
-    initial_plan := 'pro'; initial_status := 'trialing'; initial_trial_end := now() + interval '14 days';
+    initial_plan := 'pro';
+    initial_status := 'trialing';
+    initial_trial_end := now() + interval '14 days';
   elsif requested_role = 'dealer' then
-    initial_plan := 'business'; initial_status := 'trialing'; initial_trial_end := now() + interval '14 days';
+    initial_plan := 'business';
+    initial_status := 'trialing';
+    initial_trial_end := now() + interval '14 days';
   else
-    initial_plan := 'free'; initial_status := 'active'; initial_trial_end := null;
+    initial_plan := 'free';
+    initial_status := 'active';
+    initial_trial_end := null;
   end if;
 
-  insert into public.subscriptions(user_id, plan, status, currency, trial_start, trial_end)
+  insert into public.subscriptions(
+    user_id, plan, status, currency, trial_start, trial_end
+  )
   values (
     new.id, initial_plan, initial_status, 'TND',
     case when initial_status='trialing' then now() else null end,
@@ -167,7 +242,7 @@ create trigger on_auth_user_created_autodeal
 after insert on auth.users
 for each row execute procedure public.handle_autodeal_new_user();
 
--- Backfill sécurisé des comptes existants : particulier + gratuit par défaut.
+-- Backfill sécurisé des comptes Auth créés avant l'installation du schéma.
 insert into public.profiles(user_id, full_name, role)
 select id, coalesce(raw_user_meta_data->>'full_name', raw_user_meta_data->>'name'), 'user'
 from auth.users
