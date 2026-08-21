@@ -1,8 +1,4 @@
-"""
-Tests de core/detect_deals.annonces_exclues : règles métier écartant les
-annonces qui ne doivent jamais être présentées comme des affaires (accidentée,
-pièces, moteur HS, sans papiers, export), insensibles aux accents et à la casse.
-"""
+"""Tests des règles métier de détection des deals."""
 import pandas as pd
 
 from core.detect_deals import annonces_exclues
@@ -27,14 +23,31 @@ def test_exclut_moteur_hs():
         assert _exclu(t), t
 
 
-def test_exclut_sans_papiers_et_export():
-    for t in ["voiture sans papiers", "non dédouanée", "voiture pour export"]:
+def test_exclut_sans_papiers_export_et_non_dedouanee():
+    for t in [
+        "voiture sans papiers",
+        "non dédouanée",
+        "pas dedouanee",
+        "sans dédouanement",
+        "voiture pour export",
+    ]:
         assert _exclu(t), t
 
 
+def test_ne_exclut_pas_voiture_dedouanee():
+    # Régression : l'ancien motif `dedouan` excluait aussi les voitures
+    # correctement dédouanées, donc parfaitement valides.
+    for t in ["Voiture dédouanée", "BMW importée et dedouanee", "Dédouanée Tunisie"]:
+        assert not _exclu(t), t
+
+
 def test_ne_exclut_pas_annonce_saine():
-    for t in ["Toyota Agya", "Volkswagen Golf 7", "Peugeot 208 première main",
-              "Mercedes Classe C toutes options"]:
+    for t in [
+        "Toyota Agya",
+        "Volkswagen Golf 7",
+        "Peugeot 208 première main",
+        "Mercedes Classe C toutes options",
+    ]:
         assert not _exclu(t), t
 
 
