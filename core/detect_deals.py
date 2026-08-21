@@ -4,15 +4,15 @@ Filtre le fichier scoré pour ne garder que les opportunités plausibles et
 écrit `data/processed/alertes_bonnes_affaires.csv`, consommé par l'app et les
 notifications.
 
-Deux garde-fous sont volontairement distincts du modèle ML :
+Trois garde-fous sont volontairement distincts du score ML :
 - une fenêtre de décote configurée dans `config.py` ;
-- des exclusions métier (épave, accident, pièces, papiers, export...).
-
-Le plafond de décote évite de présenter comme « affaire » une valeur tellement
-extrême qu'elle est plus probablement due à une erreur de saisie ou à un
-véhicule non comparable.
+- des exclusions métier (épave, accident, pièces, papiers, export...) ;
+- pour les alertes automatiques, une source dont le holdout dépasse 20 % de
+  MdAPE est temporairement mise en quarantaine. Les annonces restent visibles
+  dans l'application mais ne déclenchent pas de notification automatique.
 """
 
+import json
 import os
 import sys
 import unicodedata
@@ -30,6 +30,9 @@ from config import (
 
 IN_FICHIER = "data/processed/tunisia-cars-scored.csv"
 FICHIER_ALERTES = "data/processed/alertes_bonnes_affaires.csv"
+DIAGNOSTICS_FICHIER = "data/processed/diagnostics_modele.json"
+SEUIL_MDAPE_SOURCE_POUR_ALERTE = 0.20
+MIN_TEST_SOURCE = 30
 
 # Insensible aux accents/casse après normalisation. Important : on n'exclut PAS
 # le mot « dédouanée » tout seul. Une voiture correctement dédouanée est une
@@ -53,14 +56,34 @@ def _sans_accents(s):
 
 
 def annonces_exclues(titres: pd.Series) -> pd.Series:
-    """True pour les annonces à écarter des affaires.
-
-    La fonction ne juge pas l'état d'une voiture à partir du prix : elle ne
-    bloque que les formulations explicitement incompatibles avec une voiture
-    standard roulante/immatriculable.
-    """
+    """True pour les annonces à écarter des affaires."""
     t = titres.fillna("").map(lambda s: _sans_accents(s).lower())
     return t.str.contains(MOTIFS_EXCLUSION, regex=True, na=False)
+
+
+def sources_trop_risquees(diagnostics: dict | None = None) -> set[str]:
+    """Sources à ne pas notifier automatiquement selon le source-holdout.
+
+    On exige au moins 30 lignes de test pour éviter de mettre une source en
+    quarantaine sur un échantillon anecdotique. Si le diagnostic est absent,
+    aucune source n'est bloquée : le filtre des comparables reste actif.
+    """
+    if diagnostics is None:
+        try:
+            diagnostics = json.loads(Path(DIAGNOSTICS_FICHIER).read_text(encoding="utf-8"))
+        except Exception:
+            return set()
+    rows = (
+        diagnostics.get("validation_robuste", {}).get("source_holdout", [])
+        if isinstance(diagnostics, dict)
+        else []
+    )
+    return {
+        str(row.get("source"))
+        for row in rows
+        if int(row.get("n_test") or 0) >= MIN_TEST_SOURCE
+        and float(row.get("mdape") or 0) > SEUIL_MDAPE_SOURCE_POUR_ALERTE
+    }
 
 
 def calculer_argus_et_liquidite():
@@ -107,15 +130,25 @@ def calculer_argus_et_liquidite():
 
     if "Nb_Comparables" in deals.columns:
         deals = deals.copy()
+        source_ok = pd.Series(True, index=deals.index)
+        risquees = sources_trop_risquees()
+        if risquees and "Source" in deals.columns:
+            source_ok = ~deals["Source"].astype(str).isin(risquees)
+            n_bloquees = int((~source_ok).sum())
+            print(
+                "⚠️ Sources en quarantaine pour notifications automatiques "
+                f"(source-holdout > {SEUIL_MDAPE_SOURCE_POUR_ALERTE:.0%}) : "
+                + ", ".join(sorted(risquees))
+                + f" — {n_bloquees} deal(s) gardé(s) dans l'app sans notification."
+            )
         deals["Alerte_Telegram"] = (
-            deals["Nb_Comparables"] >= COMPARABLES_MIN_POUR_ALERTE
+            (deals["Nb_Comparables"] >= COMPARABLES_MIN_POUR_ALERTE)
+            & source_ok
         )
         nb_solides = int(deals["Alerte_Telegram"].sum())
         print(
-            f"   dont {nb_solides} appuyée(s) sur au moins "
-            f"{COMPARABLES_MIN_POUR_ALERTE} annonces comparables ; "
-            f"{len(deals) - nb_solides} restent visibles mais ne déclenchent "
-            "pas d'alerte Telegram."
+            f"   {nb_solides} opportunité(s) autorisée(s) pour alerte automatique "
+            f"(≥ {COMPARABLES_MIN_POUR_ALERTE} comparables + source fiable)."
         )
         deals = deals.sort_values(
             ["Alerte_Telegram", "Score_Opportunite"],
