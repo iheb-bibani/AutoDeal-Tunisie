@@ -1,7 +1,7 @@
 """Tests des règles métier de détection des deals."""
 import pandas as pd
 
-from core.detect_deals import annonces_exclues
+from core.detect_deals import annonces_exclues, sources_trop_risquees
 
 
 def _exclu(titre):
@@ -35,8 +35,6 @@ def test_exclut_sans_papiers_export_et_non_dedouanee():
 
 
 def test_ne_exclut_pas_voiture_dedouanee():
-    # Régression : l'ancien motif `dedouan` excluait aussi les voitures
-    # correctement dédouanées, donc parfaitement valides.
     for t in ["Voiture dédouanée", "BMW importée et dedouanee", "Dédouanée Tunisie"]:
         assert not _exclu(t), t
 
@@ -60,3 +58,17 @@ def test_serie_et_valeurs_manquantes():
     out = annonces_exclues(s)
     assert list(out.index) == [5, 6, 7]
     assert out.loc[5] and not out.loc[6] and not out.loc[7]
+
+
+def test_source_holdout_trop_faible_bloque_notification():
+    diagnostics = {
+        "validation_robuste": {
+            "source_holdout": [
+                {"source": "source-ok", "n_test": 100, "mdape": 0.12},
+                {"source": "source-risquee", "n_test": 100, "mdape": 0.27},
+                # Échantillon trop petit : pas de quarantaine automatique.
+                {"source": "source-petite", "n_test": 10, "mdape": 0.40},
+            ]
+        }
+    }
+    assert sources_trop_risquees(diagnostics) == {"source-risquee"}
