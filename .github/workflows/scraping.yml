@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 # Un scraping dure plusieurs heures : sans verrou, le run du lendemain
-# demarrerait par-dessus celui de la veille.
+# démarrerait par-dessus celui de la veille.
 concurrency:
   group: scraping
   cancel-in-progress: false
@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 350
 
     steps:
-      - name: Recuperer le depot
+      - name: Récupérer le dépôt
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -32,7 +32,7 @@ jobs:
           python-version: '3.11'
           cache: pip
 
-      - name: Installer les dependances
+      - name: Installer les dépendances
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
@@ -64,10 +64,11 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python utils/send_telegram.py
 
-      - name: Envoyer les alertes personnalisees
+      - name: Envoyer les alertes personnalisées
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
@@ -77,7 +78,7 @@ jobs:
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
         run: python utils/send_personalized_alerts.py
 
-      - name: Enregistrer les nouvelles donnees dans le depot
+      - name: Enregistrer les nouvelles données dans le dépôt
         if: always()
         run: |
           git config user.name "github-actions[bot]"
@@ -87,14 +88,14 @@ jobs:
             echo "Pipeline complet : publication de raw + processed + models"
             git add data/raw data/processed data/models
           else
-            echo "Pipeline en echec : publication de data/raw uniquement"
+            echo "Pipeline en échec : publication de data/raw uniquement"
             git checkout -- data/processed data/models 2>/dev/null || true
             git clean -fd data/processed data/models || true
             git add data/raw
           fi
 
           if git diff --cached --quiet; then
-            echo "Rien a publier"
+            echo "Rien à publier"
             exit 0
           fi
 
@@ -105,10 +106,10 @@ jobs:
             git fetch origin main
             if git rebase -X theirs origin/main; then
               if git push origin HEAD:main; then
-                echo "Publication reussie"
+                echo "Publication réussie"
                 exit 0
               fi
-              echo "Push rejete, nouvelle tentative"
+              echo "Push rejeté, nouvelle tentative"
             else
               echo "Rebase impossible, abandon de la tentative"
               git rebase --abort || true
@@ -116,5 +117,5 @@ jobs:
             sleep $(( RANDOM % 10 + 5 ))
           done
 
-          echo "::error::Echec de publication apres 5 tentatives"
+          echo "::error::Échec de publication après 5 tentatives"
           exit 1
