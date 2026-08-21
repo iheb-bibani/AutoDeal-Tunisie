@@ -1,10 +1,9 @@
 """Paiements AutoDeal via checkout hébergé.
 
-- AutoDeal ne collecte jamais PAN/CVV.
-- Konnect est utilisé quand les secrets sont configurés.
-- Le moyen e-DINAR peut être proposé dans le checkout. D17 est traité comme
-  canal utilisateur autour de l'écosystème e-Dinar/merchant payment; le code
-  ne suppose pas qu'un débit D17 récurrent public existe.
+AutoDeal ne collecte jamais PAN/CVV. Un checkout n'est considéré activable que
+si le prestataire ET un webhook de confirmation sont configurés : accepter un
+paiement sans chemin fiable de confirmation risquerait de débiter l'utilisateur
+sans activer son abonnement.
 """
 from __future__ import annotations
 
@@ -13,7 +12,6 @@ from dataclasses import dataclass
 from typing import Iterable
 
 import requests
-
 
 PLAN_PRICES_TND = {
     "pro": {"monthly": 29, "yearly": 299},
@@ -37,6 +35,7 @@ def _secret(name: str) -> str | None:
         return value.strip()
     try:
         import streamlit as st
+
         value = st.secrets.get(name)
         return str(value).strip() if value else None
     except Exception:
@@ -46,23 +45,36 @@ def _secret(name: str) -> str | None:
 def checkout_availability() -> CheckoutAvailability:
     api_key = _secret("KONNECT_API_KEY")
     wallet_id = _secret("KONNECT_WALLET_ID")
-    if api_key and wallet_id:
+    webhook = _secret("KONNECT_WEBHOOK_URL")
+    methods = ("bank_card", "e-DINAR")
+
+    if api_key and wallet_id and webhook:
         return CheckoutAvailability(
             enabled=True,
             provider="Konnect",
             currency="TND",
-            reason="Checkout TND configuré.",
-            methods=("bank_card", "e-DINAR"),
+            reason="Checkout TND + confirmation webhook configurés.",
+            methods=methods,
         )
+
+    missing = []
+    if not api_key:
+        missing.append("KONNECT_API_KEY")
+    if not wallet_id:
+        missing.append("KONNECT_WALLET_ID")
+    if not webhook:
+        missing.append("KONNECT_WEBHOOK_URL")
     return CheckoutAvailability(
         enabled=False,
         provider="Konnect",
         currency="TND",
         reason=(
-            "Paiement non activé : configure KONNECT_API_KEY et KONNECT_WALLET_ID "
-            "après validation de votre compte marchand par le prestataire."
+            "Paiement non activé : configuration incomplète ("
+            + ", ".join(missing)
+            + "). Le webhook de confirmation est obligatoire avant d'accepter "
+            "un paiement réel."
         ),
-        methods=("bank_card", "e-DINAR"),
+        methods=methods,
     )
 
 
@@ -74,7 +86,9 @@ def _price(plan: str, billing_cycle: str) -> int:
 
 
 def _base_url() -> str:
-    return (_secret("KONNECT_API_BASE_URL") or "https://api.konnect.network/api/v2").rstrip("/")
+    return (
+        _secret("KONNECT_API_BASE_URL") or "https://api.konnect.network/api/v2"
+    ).rstrip("/")
 
 
 def start_checkout(
@@ -88,9 +102,8 @@ def start_checkout(
 ) -> str:
     """Crée un paiement hébergé Konnect et renvoie l'URL de checkout.
 
-    Le paiement est ponctuel. La récurrence/renouvellement est gérée côté
-    abonnement AutoDeal via webhooks et dates de période. Un débit réellement
-    automatique n'est activé que si le contrat/prestataire le supporte.
+    Le paiement est ponctuel. L'accès ne doit être activé qu'après confirmation
+    serveur du prestataire via le webhook configuré.
     """
     availability = checkout_availability()
     if not availability.enabled:
@@ -119,6 +132,8 @@ def start_checkout(
         "checkoutForm": True,
         "addPaymentFeesToAmount": False,
         "orderId": f"autodeal:{user_id}:{plan}:{billing_cycle}",
+        "webhook": webhook,
+        "silentWebhook": webhook,
     }
     if email:
         payload["email"] = email
@@ -126,9 +141,6 @@ def start_checkout(
         payload["firstName"] = first_name
     if last_name:
         payload["lastName"] = last_name
-    if webhook:
-        payload["webhook"] = webhook
-        payload["silentWebhook"] = webhook
     if success_url:
         payload["successUrl"] = success_url
     if fail_url:
