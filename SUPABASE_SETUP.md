@@ -1,81 +1,137 @@
-# Supabase + alertes personnalisées — AutoDeal Tunisie
+# Supabase — installation AutoDeal Tunisie
 
-## 1. Créer le projet Supabase
+Supabase est **optionnel pour la consultation publique** du marché, mais requis
+pour l'authentification, les favoris, les alertes personnalisées, les rôles et
+les abonnements.
 
-Crée un projet Supabase puis ouvre **SQL Editor** et exécute intégralement `supabase/schema.sql`.
-Le script crée `alerts`, `favorites`, `notification_settings` et `alert_deliveries`, puis active la Row Level Security (RLS).
+## 1. Initialiser un projet neuf
 
-## 2. Configurer Streamlit Cloud
+Dans **Supabase → SQL Editor**, exécute intégralement :
 
-Dans les secrets de l'application Streamlit, ajoute :
+```text
+supabase/schema.sql
+```
+
+`schema.sql` est désormais le schéma canonique d'installation. Il crée de façon
+idempotente :
+
+- `profiles` et `subscriptions` ;
+- `favorites`, `alerts`, `notification_settings`, `alert_deliveries` ;
+- `payment_transactions`, `subscription_notifications` ;
+- les politiques RLS ;
+- le trigger `on_auth_user_created_autodeal` ;
+- un backfill des comptes déjà présents dans `auth.users`.
+
+Les fichiers de `supabase/migrations/` restent utiles pour comprendre ou mettre
+à niveau une ancienne installation, mais **un nouveau projet doit partir de
+`schema.sql`**.
+
+## 2. Configurer Streamlit
+
+Dans les secrets de l'application Streamlit :
 
 ```toml
-SUPABASE_URL = "https://...supabase.co"
+SUPABASE_URL = "https://YOUR_PROJECT.supabase.co"
 SUPABASE_PUBLISHABLE_KEY = "sb_publishable_..."
 ```
 
-La publishable key peut être utilisée par l'application avec les politiques RLS. **Ne mets jamais la secret/service-role key dans les secrets accessibles au code client ou dans le dépôt.**
+La partie Streamlit utilise uniquement la clé publique avec les RLS. **Ne mets
+jamais une secret/service-role key dans le dépôt ni dans un fichier livré au
+navigateur.**
 
-## 3. Configurer GitHub Actions
+## 3. Configurer GitHub Actions / backend
 
-Dans GitHub > Settings > Secrets and variables > Actions, ajoute :
+Dans **GitHub → Settings → Secrets and variables → Actions**, ajoute :
 
 - `SUPABASE_URL`
-- `SUPABASE_SECRET_KEY` : secret/service-role key Supabase, réservée au workflow serveur
-- `TELEGRAM_TOKEN` : token du bot AutoDeal (déjà utilisé par l'alerte globale)
+- `SUPABASE_SECRET_KEY` — nom recommandé pour la clé backend Supabase
+- éventuellement `SUPABASE_SERVICE_ROLE_KEY` pour compatibilité avec une
+  ancienne configuration ; le code accepte les deux noms
+- `TELEGRAM_TOKEN` / `TELEGRAM_CHAT_ID` pour les alertes globales
 
-Pour les emails, ajoute aussi :
+Pour l'email :
 
 - `SMTP_HOST`
-- `SMTP_PORT` (souvent `587`)
+- `SMTP_PORT` (généralement `587`)
 - `SMTP_USERNAME`
 - `SMTP_PASSWORD`
 - `SMTP_FROM`
 
-Si les secrets SMTP sont absents, le script continue et ignore simplement le canal email.
+`SMTP_USER` reste accepté par la maintenance d'abonnement pour compatibilité,
+mais `SMTP_USERNAME` est le nom canonique.
 
-## 4. Authentification
+## 4. Vérifier que l'application pointe vers le bon projet
 
-L'inscription email/mot de passe utilise Supabase Auth. Par défaut, les projets Supabase hébergés demandent généralement la confirmation de l'adresse email. Configure le **Site URL** et les redirect URLs dans Supabase Auth si tu conserves la confirmation email.
+Après avoir changé `SUPABASE_URL`/`SUPABASE_PUBLISHABLE_KEY`, redémarre
+l'application Streamlit puis crée un compte depuis **👤 Mon compte**.
 
-## 5. Utilisation dans AutoDeal
+Dans Supabase, vérifie immédiatement :
 
-1. Ouvrir **👤 Mon compte** et créer un compte.
-2. Enregistrer l'email de notification et, si souhaité, le Chat ID Telegram.
-3. Depuis une annonce, cliquer **♡ Favori** pour la retrouver plus tard.
-4. Ouvrir **🔔 Alertes**, choisir marque/modèle/budget/km/année/écart marché et les canaux.
-5. Chaque nuit, après le scraping, `utils/send_personalized_alerts.py` compare les bonnes affaires aux alertes actives.
-6. `alert_deliveries` empêche de renvoyer le même lien pour la même alerte et le même canal.
+```text
+Authentication → Users
+```
 
-## Architecture
+Le nouvel utilisateur doit apparaître. Le trigger doit ensuite créer les lignes
+correspondantes dans :
+
+```text
+profiles
+subscriptions
+```
+
+Si `Authentication → Users` reste vide, l'application déployée n'utilise pas
+les secrets du projet que tu regardes ou n'a pas été redémarrée après leur
+modification.
+
+## 5. Donner le rôle admin
+
+Le rôle `admin` n'est jamais sélectionnable à l'inscription. Une fois ton compte
+créé, exécute dans SQL Editor :
+
+```sql
+update public.profiles p
+set role = 'admin', updated_at = now()
+from auth.users u
+where p.user_id = u.id
+  and u.email = 'VOTRE_EMAIL';
+```
+
+Puis déconnecte/reconnecte-toi dans AutoDeal. L'admin a accès aux vues Samsar,
+Concessionnaire et Admin.
+
+## 6. Confirmation email et mot de passe oublié
+
+Pour la confirmation d'inscription, configure correctement **Authentication →
+URL Configuration → Site URL** avec l'URL Streamlit déployée.
+
+Pour le code de récupération :
+
+1. ouvre **Authentication → Email Templates → Reset Password** ;
+2. ajoute `{{ .Token }}` au modèle ;
+3. enregistre le template.
+
+L'utilisateur pourra ensuite demander le code depuis **Mon compte → Mot de
+passe oublié**.
+
+## 7. Flux de données Supabase
 
 ```text
 Streamlit
   ├─ Supabase Auth
+  ├─ profiles / subscriptions (lecture utilisateur)
   ├─ favorites (RLS utilisateur)
   ├─ alerts (RLS utilisateur)
   └─ notification_settings (RLS utilisateur)
 
-GitHub Actions / pipeline nocturne
+GitHub Actions / backend
   ├─ scraping + scoring
   ├─ alertes_bonnes_affaires.csv
-  └─ send_personalized_alerts.py
+  ├─ send_personalized_alerts.py
+  └─ subscription_maintenance.py
        ├─ Supabase secret key
        ├─ Telegram Bot API
-       ├─ SMTP email
-       └─ alert_deliveries (déduplication)
+       └─ SMTP
 ```
 
-## Mot de passe oublié — configuration du code recovery
-
-L'interface AutoDeal utilise un **code de récupération** afin de rester compatible avec Streamlit sans JavaScript côté navigateur.
-Dans Supabase :
-
-1. Ouvrez **Authentication > Email Templates > Reset Password**.
-2. Dans le modèle d'email, affichez le code Supabase avec `{{ .Token }}`.
-3. Exemple de contenu : `Votre code de récupération AutoDeal est : {{ .Token }}`.
-4. Enregistrez le modèle.
-
-L'utilisateur pourra ensuite aller dans **Mon compte > Mot de passe oublié**, demander un code, le saisir et choisir un nouveau mot de passe.
-
-Pour la confirmation d'inscription, conservez le template de confirmation Supabase standard et vérifiez que **Authentication > URL Configuration > Site URL** pointe vers l'URL Streamlit déployée.
+Les données automobiles principales restent dans `data/` et ne sont pas
+stockées dans Supabase.
