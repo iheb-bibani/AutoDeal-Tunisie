@@ -1818,6 +1818,8 @@ def page_calculateur(df, bundle):
         try:
             prix_log = bundle["pipeline"].predict(X)[0]
             prix_theorique = float(np.expm1(prix_log))
+            # Arrondi au multiple de 500 le plus proche
+            prix_theorique = round(prix_theorique / 500) * 500
         except Exception as e:
             st.error(f"Erreur lors de la prédiction : {str(e)[:120]}")
             st.info("Relance `python core/modele_prediction.py` pour réentraîner le modèle "
