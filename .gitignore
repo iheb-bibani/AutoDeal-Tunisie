@@ -1,5 +1,10 @@
 # Ne JAMAIS committer : identifiants réels
 .env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+*.pem
+*.key
 
 # Fichiers Python courants
 __pycache__/
@@ -10,7 +15,7 @@ venv/
 # Dossier de session Playwright/Patchright (cookies persistés pour automobile.tn)
 user_data/
 
-# Journaux d'execution : regenerés à chaque run, ils créent des modifications
+# Journaux d'exécution : régénérés à chaque run, ils créent des modifications
 # à chaque commit automatique et polluent l'historique.
 logs/
 *.log
