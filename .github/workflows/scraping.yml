@@ -5,9 +5,17 @@ on:
     # Minuit heure tunisienne (UTC+1, pas de changement d'heure)
     - cron: '0 23 * * *'
   workflow_dispatch:
+  # Relance automatiquement un run de validation lorsqu'on modifie
+  # l'orchestrateur, le quality gate ou ce workflow.
+  push:
+    branches: [main]
+    paths:
+      - 'main.py'
+      - 'core/quality_gate.py'
+      - '.github/workflows/scraping.yml'
 
-# Un scraping dure plusieurs heures : sans verrou, le run du lendemain
-# démarrerait par-dessus celui de la veille.
+# Un seul pipeline data à la fois. Un correctif poussé pendant un run attendra
+# le run précédent au lieu de l'annuler et de laisser des fichiers partiels.
 concurrency:
   group: scraping
   cancel-in-progress: false
@@ -47,10 +55,22 @@ jobs:
 
       - name: Lancer le pipeline
         id: pipeline
+        env:
+          # Garde-fous : un site externe ne peut plus bloquer tout le runner.
+          AUTODEAL_SCRAPER_TIMEOUT_SECONDS: '2700'
+          AUTODEAL_STEP_TIMEOUT_SECONDS: '1200'
+          AUTODEAL_MODEL_TIMEOUT_SECONDS: '5400'
         run: xvfb-run -a python main.py
+
+      - name: Afficher le manifeste du pipeline
+        if: always()
+        run: |
+          echo '--- pipeline_run.json ---'
+          cat data/processed/pipeline_run.json 2>/dev/null || echo 'Manifeste indisponible'
 
       - name: Quality gate
         id: verif
+        if: steps.pipeline.outcome == 'success'
         run: python core/quality_gate.py
 
       - name: Suivi des performances
@@ -58,6 +78,7 @@ jobs:
         run: python core/suivi_performance.py
 
       - name: Envoyer les alertes Telegram
+        if: steps.verif.outcome == 'success'
         continue-on-error: true
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -65,6 +86,7 @@ jobs:
         run: python utils/send_telegram.py
 
       - name: Envoyer les alertes personnalisées
+        if: steps.verif.outcome == 'success'
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -88,7 +110,7 @@ jobs:
             echo "Pipeline complet : publication de raw + processed + models"
             git add data/raw data/processed data/models
           else
-            echo "Pipeline en échec : publication de data/raw uniquement"
+            echo "Pipeline/quality gate en échec : publication de data/raw uniquement"
             git checkout -- data/processed data/models 2>/dev/null || true
             git clean -fd data/processed data/models || true
             git add data/raw
