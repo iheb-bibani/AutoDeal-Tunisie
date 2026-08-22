@@ -1,10 +1,11 @@
 """Quality gate du pipeline AutoDeal.
 
-À lancer après le pipeline et avant la publication des données. Les contrôles
-portent sur le volume, la fraîcheur, la complétude, la plausibilité des prix et
-les doublons. Une source principale peut conserver un gros fichier CSV alors
-que son scraper vient de tomber : la fraîcheur est donc contrôlée séparément du
-volume.
+Le gate valide la qualité des fichiers publiables ET l'état du run courant.
+La fraîcheur d'une source ne doit pas être déduite uniquement de
+``Annonce-Detectee`` : si un scraper s'exécute correctement mais ne découvre
+aucune nouvelle annonce, cette date reste ancienne. Le manifeste écrit par
+``main.py`` est donc la source de vérité pour savoir si le scraper du run
+courant a réellement abouti.
 """
 from __future__ import annotations
 
@@ -25,41 +26,35 @@ except Exception:  # pragma: no cover
         n: str(RAW / f"{n}.csv")
         for n in ["tayara", "automax", "automobile", "sayyarat", "autocentral"]
     }
-    PROCESSED_FILES = {
-        "scored": str(PROCESSED_DATA_DIR / "tunisia-cars-scored.csv")
-    }
+    PROCESSED_FILES = {"scored": str(PROCESSED_DATA_DIR / "tunisia-cars-scored.csv")}
 
 BASELINE_PATH = Path(PROCESSED_DATA_DIR) / "quality_baseline.json"
+RUN_MANIFEST_PATH = Path(PROCESSED_DATA_DIR) / "pipeline_run.json"
 
 SOURCES_DIRECTES = ["automobile", "tayara", "automax"]
 SOURCES_OPTIONNELLES = ["sayyarat", "autocentral"]
+MIN_SOURCES_DIRECTES_OK = 2
 PLANCHER_SOURCE_DIRECTE = 30
 PLANCHER_TOTAL_ABSOLU = 300
 FRACTION_MIN_VS_REFERENCE = 0.60
 
-# Le workflow est quotidien. Une détection vieille de plus de 36 h signifie
-# normalement que le scraper principal n'a pas produit de données au run courant.
+# Ces seuils décrivent l'âge de la DERNIÈRE NOUVELLE ANNONCE observée. Ils sont
+# désormais informatifs ; l'état réel du scraper vient du manifeste du run.
 MAX_AGE_SOURCE_DIRECTE_HEURES = 36
 MAX_AGE_SOURCE_OPTIONNELLE_HEURES = 72
+MAX_AGE_MANIFEST_HEURES = 12
 
 SEUIL_PRIX_RENSEIGNE = 0.95
 SEUIL_MARQUE_RENSEIGNEE = 0.95
 SEUIL_MODELE_RENSEIGNE = 0.80
-
 PRIX_MIN, PRIX_MAX = 1_000, 3_000_000
 SEUIL_PRIX_PLAUSIBLE = 0.98
 SEUIL_DOUBLONS = 0.02
-
 SEP, ENC = ";", "utf-8-sig"
 
 
 def _log(niveau: str, msg: str) -> None:
-    prefix = {
-        "error": "::error::",
-        "warning": "::warning::",
-        "ok": "  ✓ ",
-        "info": "  • ",
-    }
+    prefix = {"error": "::error::", "warning": "::warning::", "ok": "  ✓ ", "info": "  • "}
     print(f"{prefix.get(niveau, '')}{msg}")
 
 
@@ -78,7 +73,7 @@ def age_derniere_detection_heures(
     df: pd.DataFrame,
     maintenant: datetime | pd.Timestamp | None = None,
 ) -> float | None:
-    """Âge en heures de la détection la plus récente d'un CSV brut."""
+    """Âge de la dernière NOUVELLE annonce détectée, pas du dernier run scraper."""
     if df is None or df.empty or "Annonce-Detectee" not in df.columns:
         return None
     dates = pd.to_datetime(df["Annonce-Detectee"], errors="coerce", utc=True)
@@ -86,20 +81,49 @@ def age_derniere_detection_heures(
     if pd.isna(latest):
         return None
     now = pd.Timestamp(maintenant or datetime.now(timezone.utc))
-    if now.tzinfo is None:
-        now = now.tz_localize("UTC")
-    else:
-        now = now.tz_convert("UTC")
+    now = now.tz_localize("UTC") if now.tzinfo is None else now.tz_convert("UTC")
     return max(0.0, float((now - latest).total_seconds() / 3600.0))
 
 
+def _charger_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
 def _charger_reference() -> dict:
-    if BASELINE_PATH.exists():
-        try:
-            return json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
-    return {}
+    return _charger_json(BASELINE_PATH)
+
+
+def _charger_manifest_courant(
+    maintenant: datetime | pd.Timestamp | None = None,
+) -> dict:
+    manifest = _charger_json(RUN_MANIFEST_PATH)
+    finished = manifest.get("finished_at") or manifest.get("started_at")
+    if not finished:
+        return {}
+    ts = pd.to_datetime(finished, errors="coerce", utc=True)
+    if pd.isna(ts):
+        return {}
+    now = pd.Timestamp(maintenant or datetime.now(timezone.utc))
+    now = now.tz_localize("UTC") if now.tzinfo is None else now.tz_convert("UTC")
+    age_h = float((now - ts).total_seconds() / 3600.0)
+    if age_h < -1 or age_h > MAX_AGE_MANIFEST_HEURES:
+        return {}
+    return manifest
+
+
+def scraper_a_reussi(manifest: dict, source: str) -> bool | None:
+    """True/False pour un manifeste courant, None si l'information manque."""
+    if not manifest:
+        return None
+    info = (manifest.get("scrapers") or {}).get(source)
+    if not isinstance(info, dict):
+        return None
+    return info.get("status") == "success"
 
 
 def _ecrire_reference(total: int, par_source: dict) -> None:
@@ -109,9 +133,7 @@ def _ecrire_reference(total: int, par_source: dict) -> None:
         "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     try:
-        BASELINE_PATH.write_text(
-            json.dumps(ref, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        BASELINE_PATH.write_text(json.dumps(ref, ensure_ascii=False, indent=2), encoding="utf-8")
         _log("info", f"Référence glissante mise à jour ({total} annonces).")
     except Exception as exc:
         _log("warning", f"Impossible d'écrire la référence : {exc}")
@@ -121,87 +143,85 @@ def controler() -> int:
     strict = "--strict" in sys.argv
     echecs: list[str] = []
     alertes: list[str] = []
+    manifest = _charger_manifest_courant()
 
     print("=" * 64)
     print("  QUALITY GATE — AutoDeal Tunisie")
     print("=" * 64)
 
-    # 1. Sources brutes : volume + fraîcheur.
+    if manifest:
+        _log("info", f"Manifeste run courant : {manifest.get('status', 'inconnu')}")
+    else:
+        _log("warning", "Manifeste de run absent/ancien : fallback sur les données disponibles.")
+
     par_source: dict[str, int] = {}
+    sources_directes_ok = 0
+
     for nom, chemin in SCRAPERS.items():
         df, erreur_lecture = _lire_csv(chemin)
         n = 0 if df is None else len(df)
         par_source[nom] = n
         directe = nom in SOURCES_DIRECTES
+        run_ok = scraper_a_reussi(manifest, nom)
 
-        if directe:
-            if df is None:
-                raison = (
-                    "fichier absent"
-                    if erreur_lecture == "absent"
-                    else "fichier illisible/corrompu"
-                )
-                echecs.append(f"Source directe indisponible : {nom} ({raison})")
-                _log("error", f"{nom} : {raison}")
-                continue
-            if n < PLANCHER_SOURCE_DIRECTE:
-                echecs.append(
-                    f"{nom} : {n} annonces (< {PLANCHER_SOURCE_DIRECTE})"
-                )
-                _log(
-                    "error",
-                    f"{nom} : seulement {n} annonces "
-                    f"(plancher {PLANCHER_SOURCE_DIRECTE})",
-                )
-            else:
-                _log("ok", f"{nom} : {n} annonces")
+        fichier_valide = df is not None and (not directe or n >= PLANCHER_SOURCE_DIRECTE)
+        if df is None:
+            raison = "fichier absent" if erreur_lecture == "absent" else "fichier illisible/corrompu"
+            msg = f"{nom} : {raison}"
+            (alertes if directe else alertes).append(msg)
+            _log("warning", msg)
+        elif directe and n < PLANCHER_SOURCE_DIRECTE:
+            msg = f"{nom} : seulement {n} annonces (plancher {PLANCHER_SOURCE_DIRECTE})"
+            alertes.append(msg)
+            _log("warning", msg)
         else:
-            if n == 0:
-                alertes.append(f"Source optionnelle vide : {nom}")
-                _log("warning", f"{nom} (optionnelle) : 0 annonce")
-                continue
-            _log("ok", f"{nom} (optionnelle) : {n} annonces")
+            suffix = "" if directe else " (optionnelle)"
+            _log("ok", f"{nom}{suffix} : {n} annonces")
 
-        age_h = age_derniere_detection_heures(df)
-        limite = (
-            MAX_AGE_SOURCE_DIRECTE_HEURES
-            if directe
-            else MAX_AGE_SOURCE_OPTIONNELLE_HEURES
+        # Santé opérationnelle du scraper : le manifeste est prioritaire.
+        if run_ok is True:
+            _log("ok", f"{nom} : scraper du run courant terminé avec succès")
+        elif run_ok is False:
+            msg = f"{nom} : scraper du run courant en échec/timeout"
+            alertes.append(msg)
+            _log("warning", msg)
+        else:
+            _log("info", f"{nom} : statut du scraper courant indisponible")
+
+        if directe and fichier_valide and run_ok is not False:
+            sources_directes_ok += 1
+
+        # L'âge de la dernière nouvelle annonce reste utile comme signal, mais
+        # ne doit plus faire échouer le pipeline à lui seul.
+        if df is not None and not df.empty:
+            age_h = age_derniere_detection_heures(df)
+            limite = MAX_AGE_SOURCE_DIRECTE_HEURES if directe else MAX_AGE_SOURCE_OPTIONNELLE_HEURES
+            if age_h is None:
+                msg = f"{nom} : date de dernière nouvelle annonce invérifiable"
+                alertes.append(msg)
+                _log("warning", msg)
+            elif age_h > limite:
+                msg = f"{nom} : aucune nouvelle annonce depuis {age_h:.1f} h (> {limite} h)"
+                alertes.append(msg)
+                _log("warning", msg)
+            else:
+                _log("ok", f"{nom} : dernière nouvelle annonce il y a {age_h:.1f} h")
+
+    if sources_directes_ok < MIN_SOURCES_DIRECTES_OK:
+        echecs.append(
+            f"Seulement {sources_directes_ok}/{len(SOURCES_DIRECTES)} sources directes exploitables "
+            f"(minimum {MIN_SOURCES_DIRECTES_OK})"
         )
-        if age_h is None:
-            msg = f"{nom} : fraîcheur impossible à vérifier (Annonce-Detectee absente/invalide)"
-            if directe:
-                echecs.append(msg)
-                _log("error", msg)
-            else:
-                alertes.append(msg)
-                _log("warning", msg)
-        elif age_h > limite:
-            msg = f"{nom} : dernière détection vieille de {age_h:.1f} h (> {limite} h)"
-            if directe:
-                echecs.append(msg)
-                _log("error", msg)
-            else:
-                alertes.append(msg)
-                _log("warning", msg)
-        else:
-            _log("ok", f"{nom} : fraîcheur {age_h:.1f} h")
 
-    # 2. Fichier scoré final.
     scored, _ = _lire_csv(PROCESSED_FILES.get("scored", ""))
     if scored is None or scored.empty:
         _log("error", "Fichier scoré introuvable ou vide — publication bloquée.")
-        print("=" * 64)
         return 1
     total = len(scored)
 
-    # 3. Volume total : absolu + relatif à la référence.
     if total < PLANCHER_TOTAL_ABSOLU:
         echecs.append(f"Total {total} < plancher absolu {PLANCHER_TOTAL_ABSOLU}")
-        _log(
-            "error",
-            f"Total scoré {total} sous le plancher absolu {PLANCHER_TOTAL_ABSOLU}",
-        )
+        _log("error", f"Total scoré {total} sous le plancher absolu {PLANCHER_TOTAL_ABSOLU}")
     else:
         _log("ok", f"Total scoré : {total} annonces")
 
@@ -210,29 +230,15 @@ def controler() -> int:
     if ref_total:
         seuil = int(ref_total * FRACTION_MIN_VS_REFERENCE)
         if total < seuil:
-            echecs.append(
-                f"Total {total} < {FRACTION_MIN_VS_REFERENCE:.0%} de la référence "
-                f"({ref_total} → seuil {seuil})"
-            )
-            _log(
-                "error",
-                f"Effondrement du volume : {total} vs référence {ref_total} "
-                f"(seuil {seuil})",
-            )
+            echecs.append(f"Total {total} < {FRACTION_MIN_VS_REFERENCE:.0%} de la référence ({ref_total} → seuil {seuil})")
+            _log("error", f"Effondrement du volume : {total} vs référence {ref_total} (seuil {seuil})")
         else:
-            _log(
-                "ok",
-                f"Volume vs référence : {total} / {ref_total} "
-                f"({total / ref_total:.0%})",
-            )
+            _log("ok", f"Volume vs référence : {total} / {ref_total} ({total / ref_total:.0%})")
     else:
         _log("info", "Pas de référence antérieure — contrôle relatif ignoré.")
 
-    # 4. Complétude.
     def part_renseignee(col: str) -> float:
-        if col not in scored.columns:
-            return 0.0
-        return float(scored[col].notna().mean())
+        return float(scored[col].notna().mean()) if col in scored.columns else 0.0
 
     for col, seuil in [
         ("Prix", SEUIL_PRIX_RENSEIGNE),
@@ -247,35 +253,21 @@ def controler() -> int:
         else:
             _log("ok", f"{col} renseigné : {part:.0%}")
 
-    # 5. Plausibilité des prix.
     if "Prix" in scored.columns:
         prix = pd.to_numeric(scored["Prix"], errors="coerce").dropna()
         if len(prix):
             part_ok = float(((prix >= PRIX_MIN) & (prix <= PRIX_MAX)).mean())
             if part_ok < SEUIL_PRIX_PLAUSIBLE:
-                echecs.append(
-                    f"Prix plausibles {part_ok:.1%} (< {SEUIL_PRIX_PLAUSIBLE:.0%})"
-                )
-                _log(
-                    "error",
-                    f"Prix dans [{PRIX_MIN}, {PRIX_MAX}] : {part_ok:.1%} "
-                    f"(seuil {SEUIL_PRIX_PLAUSIBLE:.0%})",
-                )
+                echecs.append(f"Prix plausibles {part_ok:.1%} (< {SEUIL_PRIX_PLAUSIBLE:.0%})")
+                _log("error", f"Prix dans [{PRIX_MIN}, {PRIX_MAX}] : {part_ok:.1%}")
             else:
                 _log("ok", f"Prix plausibles : {part_ok:.1%}")
 
-    # 6. Doublons.
     if "Lien" in scored.columns:
         taux_dup = float(scored["Lien"].duplicated().mean())
         if taux_dup > SEUIL_DOUBLONS:
-            alertes.append(
-                f"Doublons {taux_dup:.1%} (> {SEUIL_DOUBLONS:.0%})"
-            )
-            _log(
-                "warning",
-                f"Taux de doublons (Lien) : {taux_dup:.1%} "
-                f"(seuil {SEUIL_DOUBLONS:.0%})",
-            )
+            alertes.append(f"Doublons {taux_dup:.1%} (> {SEUIL_DOUBLONS:.0%})")
+            _log("warning", f"Taux de doublons (Lien) : {taux_dup:.1%}")
         else:
             _log("ok", f"Doublons (Lien) : {taux_dup:.1%}")
 
@@ -285,11 +277,7 @@ def controler() -> int:
         alertes = []
 
     if echecs:
-        _log(
-            "error",
-            f"QUALITY GATE ÉCHOUÉ — {len(echecs)} contrôle(s) dur(s) : "
-            + " | ".join(echecs),
-        )
+        _log("error", f"QUALITY GATE ÉCHOUÉ — {len(echecs)} contrôle(s) dur(s) : " + " | ".join(echecs))
         print("=" * 64)
         return 1
 
