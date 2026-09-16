@@ -1,42 +1,42 @@
 {
-  "started_at": "2026-09-15T01:14:52+00:00",
-  "finished_at": "2026-09-15T01:45:02+00:00",
+  "started_at": "2026-09-16T01:10:15+00:00",
+  "finished_at": "2026-09-16T01:37:18+00:00",
   "status": "success",
   "scrapers": {
     "tayara": {
       "script": "scrapers/scraper_tayara.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 454.9,
-      "finished_at": "2026-09-15T01:22:27+00:00"
+      "duration_seconds": 348.5,
+      "finished_at": "2026-09-16T01:16:04+00:00"
     },
     "automobile": {
       "script": "scrapers/scraper_automobile.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 1068.9,
-      "finished_at": "2026-09-15T01:40:18+00:00"
+      "duration_seconds": 1024.6,
+      "finished_at": "2026-09-16T01:33:11+00:00"
     },
     "automax": {
       "script": "scrapers/scraper_automax.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 99.2,
-      "finished_at": "2026-09-15T01:42:00+00:00"
+      "duration_seconds": 73.8,
+      "finished_at": "2026-09-16T01:34:26+00:00"
     },
     "sayyarat": {
       "script": "scrapers/scraper_sayyarat.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 38.3,
-      "finished_at": "2026-09-15T01:42:40+00:00"
+      "duration_seconds": 33.9,
+      "finished_at": "2026-09-16T01:35:02+00:00"
     },
     "autocentral": {
       "script": "scrapers/scraper_autocentral.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 51.0,
-      "finished_at": "2026-09-15T01:43:33+00:00"
+      "duration_seconds": 52.6,
+      "finished_at": "2026-09-16T01:35:57+00:00"
     }
   },
   "processing": {
@@ -44,43 +44,43 @@
       "script": "core/merging_files.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 0.8,
-      "finished_at": "2026-09-15T01:43:36+00:00"
+      "duration_seconds": 0.7,
+      "finished_at": "2026-09-16T01:36:00+00:00"
     },
     "core/nettoyer_base.py": {
       "script": "core/nettoyer_base.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 1.7,
-      "finished_at": "2026-09-15T01:43:37+00:00"
+      "duration_seconds": 1.4,
+      "finished_at": "2026-09-16T01:36:01+00:00"
     },
     "core/enrichir_base_avance.py": {
       "script": "core/enrichir_base_avance.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 0.6,
-      "finished_at": "2026-09-15T01:43:38+00:00"
+      "duration_seconds": 0.5,
+      "finished_at": "2026-09-16T01:36:01+00:00"
     },
     "core/modele_prediction.py": {
       "script": "core/modele_prediction.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 83.2,
-      "finished_at": "2026-09-15T01:45:01+00:00"
+      "duration_seconds": 75.4,
+      "finished_at": "2026-09-16T01:37:17+00:00"
     },
     "core/detect_deals.py": {
       "script": "core/detect_deals.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 0.5,
-      "finished_at": "2026-09-15T01:45:02+00:00"
+      "duration_seconds": 0.4,
+      "finished_at": "2026-09-16T01:37:17+00:00"
     },
     "core/suivi_annonces.py": {
       "script": "core/suivi_annonces.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 0.6,
-      "finished_at": "2026-09-15T01:45:02+00:00"
+      "duration_seconds": 0.5,
+      "finished_at": "2026-09-16T01:37:18+00:00"
     }
   }
 }
