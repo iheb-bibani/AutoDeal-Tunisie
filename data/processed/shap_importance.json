@@ -5,11 +5,11 @@
   "importances": [
     {
       "feature": "Modèle",
-      "pct": 38.4
+      "pct": 34.8
     },
     {
       "feature": "Cylindree",
-      "pct": 26.0
+      "pct": 28.1
     },
     {
       "feature": "Kilométrage",
@@ -17,31 +17,31 @@
     },
     {
       "feature": "Km_Par_An",
-      "pct": 7.4
-    },
-    {
-      "feature": "Marque",
-      "pct": 4.4
+      "pct": 8.9
     },
     {
       "feature": "Age_Carre",
-      "pct": 4.2
-    },
-    {
-      "feature": "Log_Kilometrage",
-      "pct": 3.7
-    },
-    {
-      "feature": "Age_Vehicule",
-      "pct": 3.0
+      "pct": 7.1
     },
     {
       "feature": "Energie",
-      "pct": 3.0
+      "pct": 3.7
+    },
+    {
+      "feature": "Log_Kilometrage",
+      "pct": 2.9
+    },
+    {
+      "feature": "Marque",
+      "pct": 2.3
+    },
+    {
+      "feature": "Age_Vehicule",
+      "pct": 2.0
     },
     {
       "feature": "Boite_Vitesse",
-      "pct": 0.4
+      "pct": 0.7
     },
     {
       "feature": "Puissance_Fiscale",
