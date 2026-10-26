@@ -22,6 +22,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
 
+from core.doublons import cle_doublon
+from core.io_atomique import ecrire_csv_atomique
 from config import (
     COMPARABLES_MIN_POUR_ALERTE,
     SEUIL_DEAL_MAX as SEUIL_MAX,
@@ -55,9 +57,27 @@ def _sans_accents(s):
     )
 
 
-def annonces_exclues(titres: pd.Series) -> pd.Series:
-    """True pour les annonces à écarter des affaires."""
-    t = titres.fillna("").map(lambda s: _sans_accents(s).lower())
+# Formulations NÉGATIVES rassurantes à neutraliser avant de chercher les motifs :
+# « non accidentée », « jamais été accidentée », « rien à refaire »… sont des
+# arguments de vente, pas des défauts. Sans ce nettoyage, ajouter la
+# description aux motifs exclurait surtout de bonnes annonces.
+NEGATIONS_RASSURANTES = (
+    r"(?:non|jamais|aucun\w*|pas|sans|zero|0)\s+(?:(?:ete|d')\s*)?(?:d'\s*)?accident\w*"
+    r"|rien\s+a\s+refaire"
+    r"|aucun\w*\s+(?:frais|travaux)\s+a\s+(?:prevoir|refaire)"
+)
+
+
+def _normaliser_texte(s) -> str:
+    return _sans_accents(s).lower().replace("’", "'")
+
+
+def annonces_exclues(titres: pd.Series, descriptions: pd.Series | None = None) -> pd.Series:
+    """True pour les annonces à écarter des affaires (titre + description)."""
+    texte = titres.fillna("").astype(str)
+    if descriptions is not None:
+        texte = texte + " " + descriptions.reindex(titres.index).fillna("").astype(str)
+    t = texte.map(_normaliser_texte).str.replace(NEGATIONS_RASSURANTES, " ", regex=True)
     return t.str.contains(MOTIFS_EXCLUSION, regex=True, na=False)
 
 
@@ -103,7 +123,7 @@ def calculer_argus_et_liquidite():
         return
 
     if "Titre" in df.columns:
-        exclues = annonces_exclues(df["Titre"])
+        exclues = annonces_exclues(df["Titre"], df["Description"] if "Description" in df.columns else None)
         if exclues.any():
             print(
                 f"🚫 {int(exclues.sum())} annonce(s) écartée(s) par règle métier "
@@ -122,6 +142,17 @@ def calculer_argus_et_liquidite():
             f"⚠️ {exclues_trop_belles} annonces avec un score > {SEUIL_MAX:.0%} "
             "écartées (signal trop extrême pour une alerte automatique)."
         )
+
+    # Une même voiture publiée sur deux sites ne doit être notifiée qu'une fois.
+    avant = len(deals)
+    deals = (
+        deals.assign(_cle=cle_doublon(deals))
+        .sort_values("Score_Opportunite", ascending=False, kind="stable")
+        .drop_duplicates("_cle", keep="first")
+        .drop(columns="_cle")
+    )
+    if avant - len(deals):
+        print(f"🔁 {avant - len(deals)} doublon(s) inter-sources fusionné(s).")
 
     print(
         f"🔎 {len(deals)} opportunité(s) retenue(s) entre {SEUIL_MIN:.0%} "
@@ -155,11 +186,18 @@ def calculer_argus_et_liquidite():
             ascending=[False, False],
         )
 
-    # Toujours écrire le fichier, même vide : sinon un ancien fichier de deals
-    # resterait visible après un run sans opportunité.
+    else:
+        print("⚠️ Nb_Comparables absent : aucune alerte automatique autorisée.")
+
+    # Toujours écrire la colonne : sans elle, send_telegram.py envoyait TOUT
+    # (échec ouvert). Absente => aucune notification automatique.
     if "Alerte_Telegram" not in deals.columns:
-        deals = deals.sort_values("Score_Opportunite", ascending=False)
-    deals.to_csv(FICHIER_ALERTES, index=False, sep=";", encoding="utf-8-sig")
+        deals = deals.assign(Alerte_Telegram=False).sort_values("Score_Opportunite", ascending=False)
+
+    # Toujours écrire le fichier, même vide : sinon un ancien fichier de deals
+    # resterait visible après un run sans opportunité. Écriture atomique : le
+    # fichier est lu par l'app, les notifications et le suivi.
+    ecrire_csv_atomique(deals, FICHIER_ALERTES)
     if len(deals):
         print(f"✅ Fichier écrit : {FICHIER_ALERTES}")
     else:

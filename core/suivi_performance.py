@@ -15,6 +15,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from core.io_atomique import ecrire_json_atomique  # noqa: E402
+
 try:
     from config import PROCESSED_FILES, PROCESSED_DATA_DIR
 except Exception:  # pragma: no cover
@@ -84,13 +87,32 @@ def _instantane(df: pd.DataFrame) -> dict:
     return snap
 
 
+class HistoriqueIllisible(RuntimeError):
+    pass
+
+
 def _charger_historique() -> list[dict]:
-    if HISTORIQUE_PATH.exists():
+    """Historique existant. Un fichier illisible n'est JAMAIS remplacé par une
+    liste vide (le run suivant écrasait alors des mois d'historique) : il est
+    mis de côté et le run s'arrête."""
+    if not HISTORIQUE_PATH.exists():
+        return []
+    try:
+        data = json.loads(HISTORIQUE_PATH.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            raise ValueError("historique non-liste")
+        return data
+    except Exception as exc:
+        sauvegarde = HISTORIQUE_PATH.with_suffix(
+            f".corrupt-{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
+        )
         try:
-            return json.loads(HISTORIQUE_PATH.read_text(encoding="utf-8"))
-        except Exception:
+            HISTORIQUE_PATH.replace(sauvegarde)
+        except OSError:
             pass
-    return []
+        raise HistoriqueIllisible(
+            f"{HISTORIQUE_PATH} illisible ({type(exc).__name__}) — copie conservée : {sauvegarde}"
+        ) from exc
 
 
 def _detecter_drift(courant: dict, historique: list[dict]) -> list[str]:
@@ -147,7 +169,7 @@ def enregistrer(strict: bool = False) -> int:
     }
     historique.append(enreg)
     try:
-        HISTORIQUE_PATH.write_text(json.dumps(historique, ensure_ascii=False, indent=2), encoding="utf-8")
+        ecrire_json_atomique(HISTORIQUE_PATH, historique)
     except Exception as e:
         print(f"::warning::Écriture de l'historique impossible : {e}")
 

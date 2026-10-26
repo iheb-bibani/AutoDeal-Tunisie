@@ -16,6 +16,9 @@ from pathlib import Path
 
 import pandas as pd
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from core.io_atomique import ecrire_json_atomique  # noqa: E402
+
 try:
     from config import PROCESSED_DATA_DIR, PROCESSED_FILES, SCRAPERS
 except Exception:  # pragma: no cover
@@ -98,6 +101,9 @@ def _charger_reference() -> dict:
     return _charger_json(BASELINE_PATH)
 
 
+ETAPES_REQUISES_POUR_PUBLICATION = ("core/detect_deals.py",)
+
+
 def _charger_manifest_courant(
     maintenant: datetime | pd.Timestamp | None = None,
 ) -> dict:
@@ -133,7 +139,7 @@ def _ecrire_reference(total: int, par_source: dict) -> None:
         "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     try:
-        BASELINE_PATH.write_text(json.dumps(ref, ensure_ascii=False, indent=2), encoding="utf-8")
+        ecrire_json_atomique(BASELINE_PATH, ref)
         _log("info", f"Référence glissante mise à jour ({total} annonces).")
     except Exception as exc:
         _log("warning", f"Impossible d'écrire la référence : {exc}")
@@ -168,7 +174,9 @@ def controler() -> int:
         if df is None:
             raison = "fichier absent" if erreur_lecture == "absent" else "fichier illisible/corrompu"
             msg = f"{nom} : {raison}"
-            (alertes if directe else alertes).append(msg)
+            # Une source directe illisible ne compte déjà plus dans
+            # sources_directes_ok (contrôle dur plus bas) : ici, simple alerte.
+            alertes.append(msg)
             _log("warning", msg)
         elif directe and n < PLANCHER_SOURCE_DIRECTE:
             msg = f"{nom} : seulement {n} annonces (plancher {PLANCHER_SOURCE_DIRECTE})"
@@ -206,6 +214,16 @@ def controler() -> int:
                 _log("warning", msg)
             else:
                 _log("ok", f"{nom} : dernière nouvelle annonce il y a {age_h:.1f} h")
+
+    # Étapes de traitement non critiques pour le pipeline mais critiques pour
+    # la PUBLICATION : sans deals frais, les notifications partiraient sur un
+    # fichier absent ou périmé.
+    for etape in ETAPES_REQUISES_POUR_PUBLICATION:
+        info = (manifest.get("processing") or {}).get(etape) if manifest else None
+        if isinstance(info, dict) and info.get("status") != "success":
+            msg = f"{etape} : {info.get('status')} dans le run courant"
+            echecs.append(msg)
+            _log("error", msg)
 
     if sources_directes_ok < MIN_SOURCES_DIRECTES_OK:
         echecs.append(

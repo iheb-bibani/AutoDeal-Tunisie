@@ -226,9 +226,11 @@ def main():
         return
 
     deals = pd.read_csv(DEALS_FILE, sep=";", encoding="utf-8-sig")
-    if "Alerte_Telegram" in deals.columns:
-        mask = deals["Alerte_Telegram"].astype(str).str.lower().isin({"true", "1", "vrai"})
-        deals = deals[mask]
+    if "Alerte_Telegram" not in deals.columns:
+        logger.warning("Colonne Alerte_Telegram absente : aucune alerte personnalisée envoyée.")
+        return
+    mask = deals["Alerte_Telegram"].astype(str).str.strip().str.lower().isin({"true", "1", "vrai"})
+    deals = deals[mask]
     if deals.empty:
         logger.info("Aucune opportunité solide à notifier.")
         return

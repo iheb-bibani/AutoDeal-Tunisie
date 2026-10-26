@@ -146,30 +146,30 @@ def envoyer_alertes_telegram():
         return
 
     # N'alerter que sur les opportunités appuyées sur assez d'annonces
-    # comparables : une "affaire" calculée à partir de 2 annonces d'un modèle
-    # rare est presque toujours une erreur d'estimation. La colonne est posée
-    # par core/detect_deals.py ; si elle est absente (ancien fichier), on
-    # envoie tout, comme avant.
+    # comparables et issues d'une source fiable (colonne posée par
+    # core/detect_deals.py). Colonne absente => AUCUN envoi : un fichier
+    # inattendu ne doit jamais déclencher une rafale de notifications.
     #
     # La comparaison passe par le texte : après un aller-retour CSV, la colonne
-    # peut revenir en chaînes "True"/"False", et `== True` ne filtrerait alors
-    # plus rien du tout, sans erreur visible.
-    if "Alerte_Telegram" in df_alertes.columns:
-        total = len(df_alertes)
-        masque = (
-            df_alertes["Alerte_Telegram"]
-            .astype(str)
-            .str.strip()
-            .str.lower()
-            .isin({"true", "1", "vrai"})
+    # peut revenir en chaînes "True"/"False".
+    total = len(df_alertes)
+    if "Alerte_Telegram" not in df_alertes.columns:
+        logger.warning("⚠️ Colonne Alerte_Telegram absente : aucune alerte envoyée.")
+        return
+    masque = (
+        df_alertes["Alerte_Telegram"]
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .isin({"true", "1", "vrai"})
+    )
+    df_alertes = df_alertes[masque]
+    ignorees = total - len(df_alertes)
+    if ignorees:
+        logger.info(
+            f"🔇 {ignorees} opportunité(s) ignorée(s) : "
+            "trop peu de comparables ou source en quarantaine."
         )
-        df_alertes = df_alertes[masque]
-        ignorees = total - len(df_alertes)
-        if ignorees:
-            logger.info(
-                f"🔇 {ignorees} opportunité(s) ignorée(s) : "
-                "trop peu d'annonces comparables pour être fiables."
-            )
 
     liens_deja_envoyes = charger_liens_envoyes()
     compteur_envois = 0

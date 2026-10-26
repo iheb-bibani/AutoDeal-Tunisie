@@ -443,9 +443,16 @@ def page_detail(df, bundle=None):
         st.markdown("### 🤖 Ce que voit le modèle")
         contrib = explain_price(bundle, row, df) if bundle else None
         if contrib is not None and not contrib.empty:
-            top = contrib.head(8).sort_values("impact")
+            top = contrib.head(8).copy()
+            if contrib.attrs.get("unit") == "log":
+                # SHAP en log-prix -> effet multiplicatif approximatif en %.
+                top["impact"] = np.expm1(top["impact"]) * 100
+                axe = "Impact sur l'estimation (%)"
+            else:
+                axe = "Impact sur l'estimation (DT)"
+            top = top.sort_values("impact")
             fig = px.bar(top, x="impact", y="label", orientation="h", title=f"Facteurs principaux ({contrib.attrs.get('method', 'explication')})",
-                         labels={"impact": "Impact sur l'estimation", "label": ""})
+                         labels={"impact": axe, "label": ""})
             fig.update_layout(height=360, margin=dict(l=10, r=10, t=55, b=10))
             st.plotly_chart(fig, use_container_width=True)
             st.caption("Impact positif = pousse l'estimation vers le haut ; impact négatif = la tire vers le bas. Si SHAP est indisponible, l'app affiche une approximation par perturbation.")

@@ -24,3 +24,65 @@ def test_comparables_sont_locaux_pas_simple_volume_modele():
     assert n.iloc[1] == 1
     assert n.iloc[2] == 0
     assert n.iloc[3] == 0
+
+
+def test_doublons_inter_sources_ne_sont_pas_des_comparables():
+    base = {"Marque": "Peugeot", "Modèle": "208", "Age_Vehicule": 4, "Année": 2022,
+            "Energie": "Essence", "Boite_Vitesse": "Manuelle"}
+    df = pd.DataFrame([
+        {**base, "Kilométrage": 60000, "Prix": 50000, "Lien": "https://a/1"},
+        # Même voiture publiée sur un 2e site : même km, même prix, autre lien.
+        {**base, "Kilométrage": 60000, "Prix": 50000, "Lien": "https://b/9"},
+        {**base, "Kilométrage": 65000, "Prix": 48000, "Lien": "https://a/2"},
+    ])
+    n = calculer_nb_comparables_locaux(df)
+    assert n.tolist() == [1, 1, 2]
+
+
+def test_cle_doublon_normalise_les_types():
+    from core.doublons import cle_doublon
+
+    df = pd.DataFrame([
+        {"Marque": "Peugeot", "Modèle": "208", "Année": 2020, "Kilométrage": 60000.0, "Prix": 50000},
+        {"Marque": "peugeot ", "Modèle": "208", "Année": "2020", "Kilométrage": "60000", "Prix": 50000.0},
+        {"Marque": "Peugeot", "Modèle": "208", "Année": None, "Kilométrage": None, "Prix": None},
+        {"Marque": "Peugeot", "Modèle": "208", "Année": None, "Kilométrage": None, "Prix": None},
+    ])
+    k = cle_doublon(df)
+    assert k.iloc[0] == k.iloc[1]
+    # Sans prix ni km : jamais fusionnées.
+    assert k.iloc[2] != k.iloc[3]
+
+
+def test_inference_regroupe_comme_l_entrainement_et_garde_les_nan():
+    import numpy as np
+    from core.inference import preparer_lignes
+
+    bundle = {
+        "features_numeriques": ["Kilométrage"],
+        "features_categorielles": ["Marque", "Modèle", "Boite_Vitesse"],
+        "marques_connues": ["Peugeot"],
+        "modeles_connus": ["208", "Autre_modele"],
+    }
+    X = preparer_lignes(bundle, {"Kilométrage": "60000", "Marque": "Lada", "Modèle": "Niva", "Boite_Vitesse": None})
+    assert X.loc[0, "Marque"] == "Autre"
+    assert X.loc[0, "Modèle"] == "Autre_modele"
+    assert X.loc[0, "Boite_Vitesse"] is np.nan or pd.isna(X.loc[0, "Boite_Vitesse"])
+    assert X.loc[0, "Kilométrage"] == 60000
+
+
+def test_ecriture_atomique_ne_laisse_pas_de_fichier_partiel(tmp_path):
+    import pytest
+    from core.io_atomique import ecrire_csv_atomique
+
+    cible = tmp_path / "f.csv"
+    ecrire_csv_atomique(pd.DataFrame({"a": [1]}), cible)
+
+    class Boom(pd.DataFrame):
+        def to_csv(self, *a, **k):
+            raise RuntimeError("kill")
+
+    with pytest.raises(RuntimeError):
+        ecrire_csv_atomique(Boom({"a": [2]}), cible)
+    assert pd.read_csv(cible, sep=";", encoding="utf-8-sig")["a"].tolist() == [1]
+    assert [p.name for p in tmp_path.iterdir()] == ["f.csv"]

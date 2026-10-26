@@ -72,3 +72,17 @@ def test_source_holdout_trop_faible_bloque_notification():
         }
     }
     assert sources_trop_risquees(diagnostics) == {"source-risquee"}
+
+
+def test_description_prise_en_compte_sans_faux_positifs_de_negation():
+    import pandas as pd
+    from core.detect_deals import annonces_exclues
+
+    titres = pd.Series(["Golf 7", "Clio 4", "Polo", "208"])
+    desc = pd.Series([
+        "Voiture non accidentée, rien à refaire",
+        "jamais été accidentée",
+        "légèrement accidentée à l'avant",
+        "moteur à refaire",
+    ])
+    assert annonces_exclues(titres, desc).tolist() == [False, False, True, True]

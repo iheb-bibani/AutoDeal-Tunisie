@@ -8,8 +8,8 @@ Principes :
 """
 from __future__ import annotations
 
-import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -52,11 +52,33 @@ def _utc_now() -> str:
 
 
 def _write_manifest(manifest: dict) -> None:
-    MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MANIFEST_PATH.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    # Écriture atomique : le quality gate lit ce fichier.
+    from core.io_atomique import ecrire_json_atomique
+
+    ecrire_json_atomique(MANIFEST_PATH, manifest)
+
+
+def _tuer_groupe(proc: subprocess.Popen, grace_seconds: int = 15) -> None:
+    """Tue le script ET ses enfants (Playwright, Chrome, xvfb).
+
+    ``subprocess.run(timeout=...)`` ne tuait que le process Python : le
+    navigateur restait orphelin et gardait verrouillé le profil persistant
+    (user_data/) du scraper suivant.
+    """
+    try:
+        pgid = os.getpgid(proc.pid)
+    except ProcessLookupError:
+        return
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            return
+        try:
+            proc.wait(timeout=grace_seconds)
+            return
+        except subprocess.TimeoutExpired:
+            continue
 
 
 def lancer(script: str, timeout_seconds: int) -> dict:
@@ -81,20 +103,25 @@ def lancer(script: str, timeout_seconds: int) -> dict:
         return result
 
     print(f"\n-> Lancement de {script} (timeout {timeout_seconds}s)...")
+    proc = None
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             [sys.executable, str(chemin)],
             cwd=str(PROJET),
-            timeout=timeout_seconds,
+            start_new_session=True,  # groupe de process dédié, tuable d'un bloc
         )
+        proc.wait(timeout=timeout_seconds)
         result["returncode"] = proc.returncode
         result["status"] = "success" if proc.returncode == 0 else "failed"
         if proc.returncode != 0:
             print(f"❌ {script} a échoué (code {proc.returncode}).")
     except subprocess.TimeoutExpired:
+        _tuer_groupe(proc)
         result["status"] = "timeout"
         print(f"⏱️ {script} interrompu après {timeout_seconds}s (timeout).")
     except Exception as exc:
+        if proc is not None and proc.poll() is None:
+            _tuer_groupe(proc)
         result["status"] = "error"
         result["error"] = f"{type(exc).__name__}: {exc}"
         print(f"❌ {script} a levé une exception : {exc}")
@@ -102,6 +129,14 @@ def lancer(script: str, timeout_seconds: int) -> dict:
         result["duration_seconds"] = round(time.monotonic() - started, 1)
         result["finished_at"] = _utc_now()
     return result
+
+
+def _supprimer_deals_precedents() -> None:
+    chemin = PROJET / "data" / "processed" / "alertes_bonnes_affaires.csv"
+    try:
+        chemin.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def _source_key(script: str) -> str:
@@ -143,6 +178,10 @@ def executer_pipeline_auto() -> None:
     print("🧹 Étape 2-3 : Nettoyage, enrichissement, modèle et deals...")
 
     for script, critique, timeout_seconds in ETAPES_TRAITEMENT:
+        if script == "core/detect_deals.py":
+            # Sans ce nettoyage, un échec de detect_deals laissait les deals de
+            # la VEILLE en place : ils étaient suivis et notifiés comme neufs.
+            _supprimer_deals_precedents()
         status = lancer(script, timeout_seconds)
         manifest["processing"][script] = status
         _write_manifest(manifest)

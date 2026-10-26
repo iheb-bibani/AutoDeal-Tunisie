@@ -93,7 +93,9 @@ def confidence_label(error_pct: float | None, n: int | None = None) -> str:
     if error_pct is None or not np.isfinite(error_pct):
         return "Inconnue"
     if n is not None and n < 20:
-        return "Modérée"
+        # Petit échantillon : jamais mieux que "Modérée", mais une erreur
+        # élevée reste "Faible" (avant : 30 % d'erreur affichait "Modérée").
+        return "Faible" if error_pct > 15 else "Modérée"
     if error_pct <= 7:
         return "Élevée"
     if error_pct <= 10:

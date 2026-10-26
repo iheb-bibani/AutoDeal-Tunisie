@@ -9,6 +9,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from core.inference import preparer_lignes, shap_par_feature
+
 LABELS_FEATURES = {
     "Log_Kilometrage": "Kilométrage (échelle log)",
     "Km_Par_An": "Kilométrage annuel",
@@ -27,23 +29,27 @@ LABELS_FEATURES = {
 
 
 def _model_row(bundle: dict, values: dict | pd.Series) -> pd.DataFrame:
-    nums = list(bundle.get("features_numeriques", []))
-    cats = list(bundle.get("features_categorielles", []))
-    names = nums + cats
-    row = pd.DataFrame([{c: values.get(c) for c in names}])
-    for c in nums:
-        row[c] = pd.to_numeric(row[c], errors="coerce")
-    for c in cats:
-        row[c] = row[c].astype(str)
-    return row[names]
+    """Ligne de modèle préparée exactement comme à l'entraînement."""
+    return preparer_lignes(bundle, values)
+
+
+def _tableau_contrib(names, impacts, method):
+    out = pd.DataFrame({"feature": names, "impact": impacts})
+    out["label"] = out["feature"].map(LABELS_FEATURES).fillna(out["feature"])
+    out["abs"] = out["impact"].abs()
+    out = out[out["abs"] > 1e-9].sort_values("abs", ascending=False)
+    out.attrs["method"] = method
+    return out
 
 
 def explain_price(bundle: dict | None, values: dict | pd.Series, df: pd.DataFrame | None = None):
     """Retourne les contributions locales au prix.
 
-    SHAP est utilisé lorsque compatible avec le modèle. Sinon, on calcule un
-    effet marginal par perturbation vers la médiane/mode du marché. Le repli
-    reste une explication approximative et est explicitement étiqueté.
+    - SHAP (méthode "SHAP") : impact en **log-prix**, colonnes one-hot
+      réagrégées par variable d'origine ;
+    - repli par perturbation (méthode "perturbation") : impact en **dinars**
+      (prix prédit − prix prédit avec la variable ramenée à la médiane/au mode).
+    L'unité est indiquée dans ``out.attrs["unit"]``.
     """
     if not bundle or "pipeline" not in bundle:
         return None
@@ -51,30 +57,20 @@ def explain_price(bundle: dict | None, values: dict | pd.Series, df: pd.DataFram
     cats = list(bundle.get("features_categorielles", []))
     names = nums + cats
     pipe = bundle["pipeline"]
+    row = _model_row(bundle, values)
 
     try:
-        import shap
-        model = pipe.named_steps.get("model")
-        prep = pipe.named_steps.get("prep")
-        if model is not None and prep is not None:
-            Xt = prep.transform(_model_row(bundle, values))
-            explainer = shap.TreeExplainer(model)
-            sv = np.asarray(explainer.shap_values(Xt))
-            vals = sv[0] if sv.ndim > 1 else sv
-            if len(vals) == len(names):
-                out = pd.DataFrame({"feature": names, "impact": vals})
-                out["label"] = out["feature"].map(LABELS_FEATURES).fillna(out["feature"])
-                out["abs"] = out["impact"].abs()
-                out = out[out["abs"] > 1e-9].sort_values("abs", ascending=False)
-                out.attrs["method"] = "SHAP"
-                return out
+        vals = shap_par_feature(pipe, row, names)[0]
+        out = _tableau_contrib(names, vals, "SHAP")
+        out.attrs["unit"] = "log"
+        return out
     except Exception:
         pass
 
     if df is None or df.empty:
         return None
     try:
-        base = float(pipe.predict(_model_row(bundle, values))[0])
+        base = float(np.expm1(pipe.predict(row)[0]))
         rows = []
         source = dict(values)
         for feature in names:
@@ -89,15 +85,12 @@ def explain_price(bundle: dict | None, values: dict | pd.Series, df: pd.DataFram
                 baseline = mode.iloc[0]
             alt = dict(source)
             alt[feature] = baseline
-            pred_alt = float(pipe.predict(_model_row(bundle, alt))[0])
-            rows.append({"feature": feature, "impact": base - pred_alt})
+            pred_alt = float(np.expm1(pipe.predict(_model_row(bundle, alt))[0]))
+            rows.append((feature, base - pred_alt))
         if not rows:
             return None
-        out = pd.DataFrame(rows)
-        out["label"] = out["feature"].map(LABELS_FEATURES).fillna(out["feature"])
-        out["abs"] = out["impact"].abs()
-        out = out[out["abs"] > 1e-9].sort_values("abs", ascending=False)
-        out.attrs["method"] = "perturbation"
+        out = _tableau_contrib([r[0] for r in rows], [r[1] for r in rows], "perturbation")
+        out.attrs["unit"] = "DT"
         return out
     except Exception:
         return None

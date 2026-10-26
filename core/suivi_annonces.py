@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import pandas as pd
 
 from config import PROCESSED_FILES
+from core.io_atomique import ecrire_csv_atomique
 
 FICHIER_SUIVI = "data/processed/suivi_annonces.csv"
 FICHIER_ALERTES = "data/processed/alertes_bonnes_affaires.csv"
@@ -185,8 +186,8 @@ def mettre_a_jour():
         .isin({"true", "1", "vrai"})
     )
 
-    os.makedirs(os.path.dirname(FICHIER_SUIVI), exist_ok=True)
-    suivi.to_csv(FICHIER_SUIVI, index=False, sep=";", encoding="utf-8-sig")
+    # Historique longitudinal non reconstructible : écriture atomique.
+    ecrire_csv_atomique(suivi, FICHIER_SUIVI)
 
     actives = int((suivi["Statut"] == "Active").sum())
     disparues_total = int((suivi["Statut"] == "Disparue").sum())

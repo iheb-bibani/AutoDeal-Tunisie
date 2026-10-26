@@ -54,3 +54,10 @@ def test_confidence_label_uses_error_and_sample_size():
     assert confidence_label(12, 100) == "Modérée"
     assert confidence_label(18, 100) == "Faible"
     assert confidence_label(6, 10) == "Modérée"
+
+
+def test_petit_echantillon_avec_forte_erreur_reste_faible():
+    from core.model_reliability import confidence_label
+
+    assert confidence_label(30, 10) == "Faible"
+    assert confidence_label(9, 10) == "Modérée"

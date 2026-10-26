@@ -39,6 +39,7 @@ import plotly.graph_objects as go
 from config import MAX_DAYS_OLD
 from core.market_valuation import market_valuation, compare_ml_to_market, evaluate_market_ml_coverage
 from core.product_insights import valuation_confidence
+from core.inference import preparer_lignes, shap_par_feature
 from core.access_control import access_badge, can_open_page, visible_pro_pages
 from services.supabase_service import current_access_context, is_configured as supabase_is_configured
 
@@ -329,58 +330,31 @@ def analyse_decote_segment(df, seg_label):
     }
 
 
-@st.cache_resource(ttl=DUREE_CACHE)
-def _shap_explainer(_bundle):
-    """Explainer SHAP du modèle (mis en cache : construit une seule fois).
-    shap est optionnel -> None si absent."""
-    try:
-        import shap
-    except ImportError:
-        return None
-    try:
-        return shap.TreeExplainer(_bundle["pipeline"].named_steps["model"])
-    except Exception:
-        return None
-
-
 def _ligne_modele(bundle, saisie):
-    """Construit un DataFrame 1 ligne aux bons dtypes pour le modèle : features
-    numériques en float, catégorielles en str. Indispensable car une catégorielle
-    à NaN sur une seule ligne devient float64 et casse l'OrdinalEncoder
-    (`isnan` sur des catégories textuelles). NaN catégoriel -> "nan" -> inconnu (-1)."""
-    noms = bundle["features_numeriques"] + bundle["features_categorielles"]
-    X1 = pd.DataFrame([{c: saisie.get(c) for c in noms}])
-    for c in bundle["features_numeriques"]:
-        X1[c] = pd.to_numeric(X1[c], errors="coerce")
-    for c in bundle["features_categorielles"]:
-        X1[c] = X1[c].astype(str)
-    return X1[noms]
+    """Ligne 1×n préparée comme à l'entraînement (catégories rares regroupées,
+    manquants imputés par le pipeline). Voir core.inference."""
+    return preparer_lignes(bundle, saisie)
 
 
 def expliquer_prix(bundle, saisie, df=None):
     """Décompose une prédiction : contribution de chaque variable pour une voiture
-    donnée. Utilise **SHAP** si disponible ; sinon un **repli par perturbation**
-    (effet marginal = prédiction réelle − prédiction avec la variable ramenée à sa
-    médiane/mode), qui ne dépend d'aucun package. Renvoie un DataFrame trié par
-    impact (colonne 'shap'), avec .attrs['methode'] ∈ {'SHAP','perturbation'}, ou
-    None si rien n'est calculable."""
+    donnée, en **log-prix**. Utilise **SHAP** si disponible (colonnes one-hot
+    réagrégées par variable) ; sinon un **repli par perturbation**. Renvoie un
+    DataFrame trié par impact (colonne 'shap'), avec .attrs['methode'] ∈
+    {'SHAP','perturbation'}, ou None si rien n'est calculable."""
     noms = bundle["features_numeriques"] + bundle["features_categorielles"]
 
     # 1) Voie SHAP (préférée)
-    explainer = _shap_explainer(bundle)
-    if explainer is not None:
-        try:
-            Xt = bundle["pipeline"].named_steps["prep"].transform(_ligne_modele(bundle, saisie))
-            sv = explainer.shap_values(Xt)[0]
-            if len(sv) == len(noms):
-                contrib = pd.DataFrame({"feature": noms, "shap": sv})
-                contrib["label"] = contrib["feature"].map(LABELS_FEATURES).fillna(contrib["feature"])
-                contrib["abs"] = contrib["shap"].abs()
-                out = contrib[contrib["abs"] > 1e-6].sort_values("abs", ascending=False)
-                out.attrs["methode"] = "SHAP"
-                return out
-        except Exception:
-            pass  # bascule sur le repli
+    try:
+        sv = shap_par_feature(bundle["pipeline"], _ligne_modele(bundle, saisie), noms)[0]
+        contrib = pd.DataFrame({"feature": noms, "shap": sv})
+        contrib["label"] = contrib["feature"].map(LABELS_FEATURES).fillna(contrib["feature"])
+        contrib["abs"] = contrib["shap"].abs()
+        out = contrib[contrib["abs"] > 1e-6].sort_values("abs", ascending=False)
+        out.attrs["methode"] = "SHAP"
+        return out
+    except Exception:
+        pass  # bascule sur le repli
 
     # 2) Repli sans shap : effet marginal par perturbation (nécessite des données)
     if df is None:
