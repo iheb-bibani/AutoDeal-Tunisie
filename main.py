@@ -32,9 +32,9 @@ SCRAPERS = [
 ]
 
 # Un scraper réseau ne doit jamais monopoliser le runner pendant des heures.
-SCRAPER_TIMEOUT_SECONDS = int(os.getenv("AUTODEAL_SCRAPER_TIMEOUT_SECONDS", "2700"))
+SCRAPER_TIMEOUT_SECONDS = int(os.getenv("AUTODEAL_SCRAPER_TIMEOUT_SECONDS", "2400"))
 DEFAULT_STEP_TIMEOUT_SECONDS = int(os.getenv("AUTODEAL_STEP_TIMEOUT_SECONDS", "1200"))
-MODEL_TIMEOUT_SECONDS = int(os.getenv("AUTODEAL_MODEL_TIMEOUT_SECONDS", "5400"))
+MODEL_TIMEOUT_SECONDS = int(os.getenv("AUTODEAL_MODEL_TIMEOUT_SECONDS", "3600"))
 
 # (script, critique, timeout)
 ETAPES_TRAITEMENT = [

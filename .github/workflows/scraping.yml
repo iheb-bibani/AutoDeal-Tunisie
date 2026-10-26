@@ -5,14 +5,9 @@ on:
     # Minuit heure tunisienne (UTC+1, pas de changement d'heure)
     - cron: '0 23 * * *'
   workflow_dispatch:
-  # Relance automatiquement un run de validation lorsqu'on modifie
-  # l'orchestrateur, le quality gate ou ce workflow.
-  push:
-    branches: [main]
-    paths:
-      - 'main.py'
-      - 'core/quality_gate.py'
-      - '.github/workflows/scraping.yml'
+  # Pas de déclencheur `push` : chaque push relançait un pipeline complet
+  # (~6 h, alertes réelles envoyées) et pouvait remplacer le run planifié en
+  # attente. La validation du code est faite par ci.yml.
 
 # Un seul pipeline data à la fois. Un correctif poussé pendant un run attendra
 # le run précédent au lieu de l'annuler et de laisser des fichiers partiels.
@@ -26,7 +21,9 @@ permissions:
 jobs:
   scraping:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    # Budget : 5 scrapers × 40 min + 4 étapes × 20 min + modèle 60 min = 340 min
+    # (+ installation). Doit rester sous la limite GitHub de 360 min.
+    timeout-minutes: 358
 
     steps:
       - name: Récupérer le dépôt
@@ -51,15 +48,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb
-          python -m patchright install chrome || true
+          python -m patchright install chrome || echo "::warning::Chrome stable non installé : le scraper automobile.tn échouera."
 
       - name: Lancer le pipeline
         id: pipeline
         env:
           # Garde-fous : un site externe ne peut plus bloquer tout le runner.
-          AUTODEAL_SCRAPER_TIMEOUT_SECONDS: '2700'
+          AUTODEAL_SCRAPER_TIMEOUT_SECONDS: '2400'
           AUTODEAL_STEP_TIMEOUT_SECONDS: '1200'
-          AUTODEAL_MODEL_TIMEOUT_SECONDS: '5400'
+          AUTODEAL_MODEL_TIMEOUT_SECONDS: '3600'
         run: xvfb-run -a python main.py
 
       - name: Afficher le manifeste du pipeline
@@ -103,10 +100,15 @@ jobs:
         run: python utils/send_personalized_alerts.py
 
       - name: Enregistrer les nouvelles données dans le dépôt
-        if: always()
+        # !cancelled() et non always() : un job annulé (timeout global) ne doit
+        # pas publier des fichiers partiellement écrits.
+        if: ${{ !cancelled() }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # CSV bruts illisibles / tronqués : restaurés avant toute publication.
+          python utils/verifier_donnees_brutes.py
 
           if [ "${{ steps.verif.outcome }}" = "success" ]; then
             echo "Pipeline complet : publication de raw + processed + models"

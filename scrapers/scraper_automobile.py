@@ -6,6 +6,14 @@ from datetime import datetime
 from patchright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 import pandas as pd
+import sys
+from pathlib import Path
+
+# Racine du projet importable (lancé en `python scrapers/xxx.py`).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core.io_atomique import ecrire_csv_atomique  # noqa: E402
+from scrapers.liens_vus import enregistrer_liens_vus  # noqa: E402
+from scrapers.parsing import parser_prix_tnd  # noqa: E402
 
 # -------------------------------------------------
 # CONFIGURATION
@@ -59,16 +67,15 @@ def migrer_colonnes(chemin=FICHIER_AUTOMOBILE):
     """
     if not os.path.exists(chemin) or os.path.getsize(chemin) == 0:
         return
-    try:
-        df = pd.read_csv(chemin, sep=";", encoding="utf-8-sig")
-    except Exception:
-        return
+    # Lecture impossible = on s'ARRÊTE : continuer en append sous un en-tête
+    # différent décalerait silencieusement toutes les colonnes.
+    df = pd.read_csv(chemin, sep=";", encoding="utf-8-sig")
     manquantes = [c for c in COLONNES_FINALES if c not in df.columns]
     if not manquantes:
         return
     for col in manquantes:
         df[col] = pd.NA
-    df[COLONNES_FINALES].to_csv(chemin, index=False, sep=";", encoding="utf-8-sig")
+    ecrire_csv_atomique(df[COLONNES_FINALES], chemin)
     print(f"Colonnes ajoutées à {chemin} : {', '.join(manquantes)}")
 
 
@@ -173,7 +180,7 @@ def extraire_specs_dynamiques(html_page, url_annonce):
     # à 0 ressemble à la meilleure affaire du siècle pour n'importe quel modèle de
     # scoring, et pouvait générer une fausse alerte "voiture à 0 DT". None est le
     # bon défaut : une valeur manquante ne doit jamais devenir un zéro fantôme.
-    prix_dt = "".join(filter(str.isdigit, prix_el.get_text())) if prix_el else None
+    prix_dt = parser_prix_tnd(prix_el.get_text(" ", strip=True)) if prix_el else None
 
     # Paires clé/valeur génériques (Marque, Modèle, Gouvernorat, Date de
     # l'annonce, etc. utilisent toutes cette même structure spec-name/spec-value)
@@ -324,6 +331,9 @@ def scrape_automobile_tn():
         )
         page = browser.pages[0] if browser.pages else browser.new_page()
 
+        liens_vus: dict[str, None] = {}
+        pages_en_echec = 0
+        fin_naturelle = False
         for page_num in range(1, MAX_PAGES + 1):
             print(f"📖 Page {page_num}...")
             url_liste = (
@@ -339,6 +349,7 @@ def scrape_automobile_tn():
                 ok = attendre_cloudflare(page, timeout_ms=120000)
                 if not ok:
                     print(f"⏭️ Passage à la page suivante, échec sur la page {page_num}.")
+                    pages_en_echec += 1
                     continue
 
                 # Laisse le JS du site finir de peupler le DOM après le challenge
@@ -358,15 +369,31 @@ def scrape_automobile_tn():
                             if not href.startswith("http")
                             else href
                         )
+                        liens_vus[full_url] = None
                         if full_url not in liens_annonces and full_url not in liens_deja_scrapes:
                             liens_annonces.append(full_url)
 
                 print(f"   → {len(elements)} annonces trouvées sur cette page.")
+                if not elements and page_num > 1:
+                    # Page vide après la 1re : fin du catalogue, inutile de
+                    # consommer le budget de temps sur des pages vides.
+                    fin_naturelle = True
+                    break
                 time.sleep(random.uniform(3, 6))
 
             except Exception as e:
                 print(f"Erreur page {page_num}: {e}")
+                pages_en_echec += 1
                 continue
+
+        if not liens_vus:
+            browser.close()
+            print("❌ Aucune annonce collectée sur les pages de liste (Cloudflare ou structure changée).")
+            sys.exit(1)
+        if fin_naturelle and pages_en_echec == 0:
+            enregistrer_liens_vus("automobile", liens_vus)
+        else:
+            print("⚠️ Catalogue incomplet : liens vus non publiés (pas de fausses disparitions).")
 
         # --- Visite de chaque annonce pour extraire les specs détaillées ---
         nb_extraites = 0
@@ -398,10 +425,10 @@ def scrape_automobile_tn():
     # annonce serait apparue deux fois dans la pagination du run en cours.
     if os.path.exists(FICHIER_AUTOMOBILE) and os.path.getsize(FICHIER_AUTOMOBILE) > 0:
         try:
-            df_final = pd.read_csv(FICHIER_AUTOMOBILE, sep=";")
+            df_final = pd.read_csv(FICHIER_AUTOMOBILE, sep=";", encoding="utf-8-sig")
             avant = len(df_final)
             df_final = df_final.drop_duplicates(subset=["Lien"], keep="last")
-            df_final.to_csv(FICHIER_AUTOMOBILE, index=False, sep=";", encoding="utf-8-sig")
+            ecrire_csv_atomique(df_final, FICHIER_AUTOMOBILE)
             if avant != len(df_final):
                 print(f"🧹 {avant - len(df_final)} doublons supprimés. Total : {len(df_final)} lignes.")
         except Exception as e:

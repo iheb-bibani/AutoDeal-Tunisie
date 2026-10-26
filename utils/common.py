@@ -63,7 +63,9 @@ def enregistrer_ligne(car: dict, chemin: str, colonnes: list):
             encoding="utf-8-sig",
         )
     except Exception as e:
+        # Journaliser puis relancer : une annonce ne doit jamais être perdue en silence.
         logger.error(f"❌ Erreur lors de l'enregistrement de la ligne: {e}")
+        raise
 
 
 def attendre_aleatoire(min_sec: float = 0.5, max_sec: float = 2.0) -> None:
@@ -118,8 +120,9 @@ def charger_dataframe_securise(chemin: str, sep: str = ";") -> Optional[pd.DataF
 def sauvegarder_dataframe(df: pd.DataFrame, chemin: str, sep: str = ";") -> bool:
     """Sauvegarde un DataFrame avec gestion d'erreurs"""
     try:
-        os.makedirs(os.path.dirname(chemin) or ".", exist_ok=True)
-        df.to_csv(chemin, index=False, sep=sep, encoding="utf-8-sig")
+        from core.io_atomique import ecrire_csv_atomique
+
+        ecrire_csv_atomique(df, chemin, sep=sep)
         logger.info(f"✅ Fichier sauvegardé: {chemin} ({len(df)} lignes)")
         return True
     except Exception as e:

@@ -35,6 +35,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import pandas as pd
 from playwright.sync_api import sync_playwright
 
+from core.regles_texte import MARQUES_VALIDES
+from scrapers.liens_vus import enregistrer_liens_vus
+from scrapers.parsing import parser_annee, parser_entier, parser_prix_tnd
+
 BASE = "https://www.autocentral.tn"
 FICHIER = "data/raw/autocentral.csv"
 
@@ -63,12 +67,17 @@ EXTRACTEUR_JS = r"""
     if (!m) continue;
     const source = m[1];          // AUTOMOBILETN / TAYARA / FACEBOOK ...
     const idPost = m[1] + '-' + m[2];
-    // Carte = plus proche ancêtre "raisonnable" contenant le prix
+    // Carte = plus proche ancêtre contenant le prix, SANS jamais remonter
+    // jusqu'à un conteneur qui englobe plusieurs annonces (sinon on lisait le
+    // texte de la grille entière : année/prix de la 1re carte pour toutes).
+    const nbVignettes = (el) => el.querySelectorAll('img[src*="car-posts/"]').length;
     let carte = img.closest('a, article, li, div');
-    for (let i = 0; i < 4 && carte && !/DT/.test(carte.innerText || ''); i++) {
-      carte = carte.parentElement;
+    for (let i = 0; i < 6 && carte && !/DT/.test(carte.innerText || ''); i++) {
+      const parent = carte.parentElement;
+      if (!parent || nbVignettes(parent) > 1) break;
+      carte = parent;
     }
-    if (!carte) continue;
+    if (!carte || nbVignettes(carte) > 1 || !/DT/.test(carte.innerText || '')) continue;
     const txt = (carte.innerText || '').replace(/\u00a0/g, ' ');
     const tel = carte.querySelector('a[href^="tel:"]');
     cartes.push({
@@ -83,47 +92,54 @@ EXTRACTEUR_JS = r"""
 """
 
 
-def _num(s):
-    if not s:
-        return None
-    n = re.sub(r"[^\d]", "", str(s))
-    return int(n) if n else None
+_ENERGIES = ["Essence", "Diesel", "Hybride", "Hybrid", "Electrique", "Électrique", "GPL"]
+_BOITES = ["Automatique", "Manuelle"]
+_MOTS_NON_LIEU = {e.lower() for e in _ENERGIES + _BOITES} | {"dsg", "bva", "bvm", "voir l'annonce", "voir l’annonce"}
 
 
 def parser_carte(c):
-    """Transforme le texte brut d'une carte en champs. Heuristique, basée sur le
-    format observé : 'TITRE\\nYEAR Marque Modèle\\nNN km\\nNcv Carburant\\nBoite\\nPRIX DT ...'"""
-    txt = c["texte"] or ""
-    prix = None
-    mprix = re.search(r"([\d\s]+)\s*DT", txt)
-    if mprix:
-        prix = _num(mprix.group(1))
-    annee = None
-    man = re.search(r"\b(19|20)\d{2}\b", txt)
-    if man:
-        annee = int(man.group(0))
-    km = None
-    mkm = re.search(r"([\d\s]+)\s*km", txt, re.IGNORECASE)
-    if mkm:
-        km = _num(mkm.group(1))
+    """Transforme le texte brut d'une carte en champs, LIGNE PAR LIGNE.
+
+    Format observé : 'TITRE\nYEAR Marque Modèle\nNN km\nNcv Carburant\nBoite\nPRIX DT ...'
+    Les anciennes regex utilisaient [\\d\\s]+ qui traversait les sauts de ligne
+    ("2020\\n15000 km" -> 202015000 km) et prenaient n'importe quel mot après
+    l'année comme marque ("DSG", "Diesel"…).
+    """
+    txt = (c.get("texte") or "").replace("\u00a0", " ")
+    lignes = [l.strip() for l in txt.splitlines() if l.strip()]
+
+    prix = next((parser_prix_tnd(l) for l in lignes if re.search(r"\bDT\b", l, re.I) and parser_prix_tnd(l)), None)
+    km = next((parser_entier(l, maxi=1_000_000) for l in lignes if re.search(r"\d\s*km\b", l, re.I)), None)
     cv = None
-    mcv = re.search(r"(\d{1,2})\s*cv", txt, re.IGNORECASE)
-    if mcv:
-        cv = int(mcv.group(1))
-    energie = next((e for e in ["Essence", "Diesel", "Hybrid", "Electrique", "Électrique"]
-                    if re.search(e, txt, re.IGNORECASE)), None)
-    boite = next((b for b in ["Automatique", "Manuelle"]
-                  if re.search(b, txt, re.IGNORECASE)), None)
-    # Ligne "YEAR Marque Modèle" -> marque/modèle
-    marque = modele = None
-    mmm = re.search(r"\b(?:19|20)\d{2}\s+([A-Za-zÀ-ÿ]+)\s+(.+)", txt)
-    if mmm:
-        marque = mmm.group(1).strip()
-        modele = mmm.group(2).splitlines()[0].strip()
-    # Localisation : dernière ligne courte sans chiffre (ex "Tunis", "Sfax")
+    for l in lignes:
+        mcv = re.search(r"\b(\d{1,2})\s*cv\b", l, re.I)
+        if mcv:
+            cv = int(mcv.group(1))
+            break
+    energie = next((e for e in _ENERGIES if re.search(rf"\b{e}\b", txt, re.I)), None)
+    boite = next((b for b in _BOITES if re.search(rf"\b{b}\b", txt, re.I)), None)
+
+    # Ligne "YEAR Marque Modèle" : la marque doit être une marque connue.
+    annee = marque = modele = None
+    for l in lignes:
+        m = re.match(r"^((?:19|20)\d{2})\s+(\S+)(?:\s+(.+))?$", l)
+        if m:
+            annee = int(m.group(1))
+            cand = MARQUES_VALIDES.get(m.group(2).lower())
+            if cand:
+                marque = cand
+                modele = (m.group(3) or "").strip() or None
+            break
+    if annee is None:
+        annee = parser_annee(c.get("titre") or "")
+
+    # Localisation : dernière ligne courte, sans chiffre, qui n'est ni une
+    # énergie, ni une boîte, ni un bouton.
     loc = None
-    for ligne in reversed([l.strip() for l in txt.splitlines() if l.strip()]):
-        if len(ligne) <= 20 and not re.search(r"\d|DT|km|cv|Appeler|il y a", ligne):
+    for ligne in reversed(lignes):
+        bas = ligne.lower()
+        if (len(ligne) <= 20 and not re.search(r"\d|DT|km|cv|appeler|il y a|→", ligne, re.I)
+                and bas not in _MOTS_NON_LIEU):
             loc = ligne
             break
     return {
@@ -162,43 +178,55 @@ def enregistrer_ligne(car, chemin=FICHIER):
 def scraper():
     deja = liens_deja_vus(FICHIER)
     gardes = ignores = 0
+    liens_vus: dict[str, object] = {}
+    fin_naturelle = False
     with sync_playwright() as p:
         nav = p.chromium.launch(headless=True)
-        page = nav.new_context(locale="fr-FR").new_page()
-        page.goto(BASE, wait_until="domcontentloaded", timeout=45000)
         try:
-            page.wait_for_selector('img[src*="car-posts/"]', timeout=15000)
-        except Exception:
-            print("❌ Aucune annonce chargée (structure changée ?).")
-            nav.close()
-            return
-
-        # Pagination : cliquer « Charger plus d'annonces » plusieurs fois.
-        for _ in range(MAX_CHARGEMENTS):
+            page = nav.new_context(locale="fr-FR").new_page()
+            page.goto(BASE, wait_until="domcontentloaded", timeout=45000)
             try:
-                btn = page.get_by_text(re.compile("Charger plus", re.I))
-                if btn.count() == 0:
-                    break
-                btn.first.click(timeout=5000)
-                time.sleep(random.uniform(1.2, 2.2))
+                page.wait_for_selector('img[src*="car-posts/"]', timeout=15000)
             except Exception:
-                break
+                print("❌ Aucune annonce chargée (structure changée ?).")
+                sys.exit(1)
 
-        cartes = page.evaluate(EXTRACTEUR_JS)
-        vus_run = set()
-        for c in cartes:
-            # DÉDUP PAR SOURCE : on saute ce qu'on récupère déjà en direct.
-            if c["source"] in SOURCES_DEJA_VUES:
-                ignores += 1
-                continue
-            car = parser_carte(c)
-            if car["_id"] in vus_run or car["Lien"] in deja:
-                continue
-            vus_run.add(car["_id"])
-            if car["Titre"] and car["Prix_DT"]:
-                enregistrer_ligne(car)
-                gardes += 1
-        nav.close()
+            # Pagination : cliquer « Charger plus d'annonces » plusieurs fois.
+            for _ in range(MAX_CHARGEMENTS):
+                try:
+                    btn = page.get_by_text(re.compile("Charger plus", re.I))
+                    if btn.count() == 0:
+                        fin_naturelle = True
+                        break
+                    btn.first.click(timeout=5000)
+                    time.sleep(random.uniform(1.2, 2.2))
+                except Exception:
+                    break
+
+            cartes = page.evaluate(EXTRACTEUR_JS)
+        finally:
+            nav.close()
+
+    vus_run = set()
+    for c in cartes:
+        # DÉDUP PAR SOURCE : on saute ce qu'on récupère déjà en direct.
+        if c["source"] in SOURCES_DEJA_VUES:
+            ignores += 1
+            continue
+        car = parser_carte(c)
+        liens_vus[car["Lien"]] = car["Prix_DT"]
+        if car["_id"] in vus_run or car["Lien"] in deja:
+            continue
+        vus_run.add(car["_id"])
+        if car["Titre"] and car["Prix_DT"]:
+            enregistrer_ligne(car)
+            gardes += 1
+
+    if not cartes:
+        print("❌ Aucune carte d'annonce extraite (structure changée ?).")
+        sys.exit(1)
+    if fin_naturelle and liens_vus:
+        enregistrer_liens_vus("autocentral", liens_vus)
 
     print(f"✅ Terminé : {gardes} annonce(s) NOUVELLE(s) gardée(s), "
           f"{ignores} ignorée(s) (déjà scrapées via leur source d'origine) -> {FICHIER}")

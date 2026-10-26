@@ -23,6 +23,10 @@ import pandas as pd
 
 from config import PROCESSED_FILES
 from core.io_atomique import ecrire_csv_atomique
+from scrapers.liens_vus import SOURCE_LABELS, charger_liens_vus
+from scrapers.parsing import parser_prix_tnd
+
+MANIFESTE = "data/processed/pipeline_run.json"
 
 FICHIER_SUIVI = "data/processed/suivi_annonces.csv"
 FICHIER_ALERTES = "data/processed/alertes_bonnes_affaires.csv"
@@ -78,75 +82,51 @@ def _sources_suspectes(suivi: pd.DataFrame, merged: pd.DataFrame) -> set[str]:
     return suspectes
 
 
-def mettre_a_jour():
-    aujourd_hui = datetime.now().strftime("%Y-%m-%d")
+def _sources_echouees() -> set[str]:
+    """Scrapers en échec/timeout dans le manifeste du run courant."""
+    try:
+        import json
 
-    merged = pd.read_csv(PROCESSED_FILES["merged"], sep=";", encoding="utf-8-sig")
-    merged = merged.dropna(subset=["Lien"]).drop_duplicates(subset=["Lien"], keep="last")
-    liens_du_jour = set(merged["Lien"].astype(str))
-    print(f"Annonces vues aujourd'hui : {len(liens_du_jour)}")
+        with open(MANIFESTE, encoding="utf-8") as f:
+            scrapers = (json.load(f) or {}).get("scrapers") or {}
+    except (OSError, ValueError):
+        return set()
+    return {k for k, v in scrapers.items() if isinstance(v, dict) and v.get("status") != "success"}
 
-    suivi = charger_suivi()
-    connus = set(suivi["Lien"].astype(str)) if len(suivi) else set()
 
-    # ---- Garde-fous anti faux-positifs -----------------------------------
-    actifs_avant = int((suivi["Statut"] == "Active").sum()) if len(suivi) else 0
-    scraping_suspect = (
-        actifs_avant > 0
-        and len(liens_du_jour) < actifs_avant * SEUIL_VOLUME_SUSPECT
-    )
-    if scraping_suspect:
-        print(
-            f"⚠️  Volume global du jour ({len(liens_du_jour)}) très inférieur aux "
-            f"{actifs_avant} annonces actives connues : aucune disparition ne sera "
-            "enregistrée sur ce run."
-        )
-    sources_suspectes = _sources_suspectes(suivi, merged)
+def observations_du_jour() -> tuple[set[str], dict[str, float], set[str]] | None:
+    """Liens réellement vus aujourd'hui par les scrapers ayant abouti.
 
-    # ---- Annonces déjà suivies et revues aujourd'hui --------------------
-    if len(suivi):
-        vue = suivi["Lien"].astype(str).isin(liens_du_jour)
-        prix_du_jour = merged.set_index(merged["Lien"].astype(str))["Prix"]
-        suivi.loc[vue, "Derniere_Vue"] = aujourd_hui
-        suivi.loc[vue, "Prix_Dernier"] = (
-            suivi.loc[vue, "Lien"].astype(str).map(prix_du_jour).values
-        )
+    Renvoie (liens, prix_affiches, labels_sources_observees) ou None si aucun
+    scraper n'a publié ses liens vus (mode historique).
+    """
+    vus = charger_liens_vus()
+    echecs = _sources_echouees()
+    liens: set[str] = set()
+    prix: dict[str, float] = {}
+    labels: set[str] = set()
+    for source, liens_prix in vus.items():
+        if source in echecs or source not in SOURCE_LABELS:
+            continue
+        labels.add(SOURCE_LABELS[source])
+        for lien, p in liens_prix.items():
+            liens.add(str(lien))
+            v = parser_prix_tnd(f"{p} DT") if p not in (None, "", "N/A") else None
+            if v:
+                prix[str(lien)] = float(v)
+    return (liens, prix, labels) if labels else None
 
-        revenues = vue & (suivi["Statut"] == "Disparue")
-        if revenues.sum():
-            suivi.loc[revenues, "Statut"] = "Active"
-            suivi.loc[revenues, "Date_Disparition"] = pd.NA
-            suivi.loc[revenues, "Jours_En_Ligne"] = pd.NA
-            suivi.loc[revenues, "Nb_Reapparitions"] = (
-                pd.to_numeric(
-                    suivi.loc[revenues, "Nb_Reapparitions"], errors="coerce"
-                ).fillna(0) + 1
-            )
-            print(f"↩️  {int(revenues.sum())} annonce(s) réapparue(s) — remises en actif.")
 
-    # ---- Disparitions ---------------------------------------------------
-    nb_disparues = 0
-    if len(suivi) and not scraping_suspect:
-        disparues = (
-            ~suivi["Lien"].astype(str).isin(liens_du_jour)
-            & (suivi["Statut"] == "Active")
-        )
-        if sources_suspectes and "Source" in suivi.columns:
-            source_norm = suivi["Source"].fillna("<inconnue>").astype(str)
-            disparues &= ~source_norm.isin(sources_suspectes)
+def _source_observee(sources: pd.Series, labels: set[str]) -> pd.Series:
+    s = sources.fillna("").astype(str)
+    masque = pd.Series(False, index=sources.index)
+    for label in labels:
+        masque |= s.str.startswith(label)
+    return masque
 
-        if disparues.sum():
-            suivi.loc[disparues, "Statut"] = "Disparue"
-            suivi.loc[disparues, "Date_Disparition"] = aujourd_hui
-            duree = (
-                pd.to_datetime(aujourd_hui)
-                - pd.to_datetime(
-                    suivi.loc[disparues, "Premiere_Vue"], errors="coerce"
-                )
-            ).dt.days
-            suivi.loc[disparues, "Jours_En_Ligne"] = duree.values
-            nb_disparues = int(disparues.sum())
 
+def _finaliser(suivi, merged, connus, aujourd_hui, nb_disparues):
+    """Ajoute les nouvelles annonces, marque les opportunités et écrit le suivi."""
     # ---- Nouvelles annonces --------------------------------------------
     nouveaux = merged[~merged["Lien"].astype(str).isin(connus)].copy()
     if len(nouveaux):
@@ -214,6 +194,138 @@ def mettre_a_jour():
     print(f"Fichier : {FICHIER_SUIVI}")
     print("-" * 30)
 
+
+def mettre_a_jour_depuis_observations(suivi, merged, connus, aujourd_hui, liens_vus, prix_vus, labels):
+    """Suivi fondé sur les liens réellement observés par chaque scraper.
+
+    Une annonce ne peut disparaître que si SA source a été observée
+    aujourd'hui, et que le volume observé de cette source est crédible.
+    """
+    print(f"Annonces vues aujourd'hui (pages de liste) : {len(liens_vus)} — sources : {', '.join(sorted(labels))}")
+    prix_merged = merged.set_index(merged["Lien"].astype(str))["Prix"] if "Prix" in merged else pd.Series(dtype=float)
+
+    if len(suivi):
+        source_suivi = suivi["Source"] if "Source" in suivi.columns else pd.Series(pd.NA, index=suivi.index)
+        observee = _source_observee(source_suivi, labels)
+        vue = suivi["Lien"].astype(str).isin(liens_vus)
+
+        # Garde-fou par source : volume vu vs actifs connus de cette source.
+        suspects = set()
+        for label in labels:
+            de_la_source = source_suivi.fillna("").astype(str).str.startswith(label)
+            actifs = int((de_la_source & (suivi["Statut"] == "Active")).sum())
+            vus_source = int((de_la_source & vue).sum())
+            if actifs and vus_source < actifs * SEUIL_VOLUME_SUSPECT:
+                suspects.add(label)
+                print(f"⚠️  {label} : {vus_source} annonce(s) suivie(s) revue(s) sur {actifs} actives — "
+                      "disparitions gelées pour cette source.")
+        observee &= ~_source_observee(source_suivi, suspects)
+
+        suivi.loc[vue, "Derniere_Vue"] = aujourd_hui
+        liens = suivi.loc[vue, "Lien"].astype(str)
+        nouveau_prix = liens.map(prix_vus).fillna(liens.map(prix_merged))
+        suivi.loc[vue, "Prix_Dernier"] = nouveau_prix.where(nouveau_prix.notna(), suivi.loc[vue, "Prix_Dernier"]).values
+
+        revenues = vue & (suivi["Statut"] == "Disparue")
+        if revenues.sum():
+            suivi.loc[revenues, "Statut"] = "Active"
+            suivi.loc[revenues, "Date_Disparition"] = pd.NA
+            suivi.loc[revenues, "Jours_En_Ligne"] = pd.NA
+            suivi.loc[revenues, "Nb_Reapparitions"] = (
+                pd.to_numeric(suivi.loc[revenues, "Nb_Reapparitions"], errors="coerce").fillna(0) + 1
+            )
+            print(f"↩️  {int(revenues.sum())} annonce(s) réapparue(s) — remises en actif.")
+
+        disparues = observee & ~vue & (suivi["Statut"] == "Active")
+        nb_disparues = int(disparues.sum())
+        if nb_disparues:
+            suivi.loc[disparues, "Statut"] = "Disparue"
+            suivi.loc[disparues, "Date_Disparition"] = aujourd_hui
+            duree = (pd.to_datetime(aujourd_hui) - pd.to_datetime(suivi.loc[disparues, "Premiere_Vue"], errors="coerce")).dt.days
+            suivi.loc[disparues, "Jours_En_Ligne"] = duree.values
+    else:
+        nb_disparues = 0
+
+    _finaliser(suivi, merged, connus, aujourd_hui, nb_disparues)
+
+
+def mettre_a_jour():
+    aujourd_hui = datetime.now().strftime("%Y-%m-%d")
+
+    merged = pd.read_csv(PROCESSED_FILES["merged"], sep=";", encoding="utf-8-sig")
+    merged = merged.dropna(subset=["Lien"]).drop_duplicates(subset=["Lien"], keep="last")
+    suivi = charger_suivi()
+    connus = set(suivi["Lien"].astype(str)) if len(suivi) else set()
+
+    observations = observations_du_jour()
+    if observations is not None:
+        mettre_a_jour_depuis_observations(suivi, merged, connus, aujourd_hui, *observations)
+        return
+
+    # Mode historique (aucun scraper n'a publié ses liens vus) : le fichier
+    # fusionné sert de catalogue du jour.
+    liens_du_jour = set(merged["Lien"].astype(str))
+    print(f"Annonces vues aujourd'hui : {len(liens_du_jour)}")
+
+    # ---- Garde-fous anti faux-positifs -----------------------------------
+    actifs_avant = int((suivi["Statut"] == "Active").sum()) if len(suivi) else 0
+    scraping_suspect = (
+        actifs_avant > 0
+        and len(liens_du_jour) < actifs_avant * SEUIL_VOLUME_SUSPECT
+    )
+    if scraping_suspect:
+        print(
+            f"⚠️  Volume global du jour ({len(liens_du_jour)}) très inférieur aux "
+            f"{actifs_avant} annonces actives connues : aucune disparition ne sera "
+            "enregistrée sur ce run."
+        )
+    sources_suspectes = _sources_suspectes(suivi, merged)
+
+    # ---- Annonces déjà suivies et revues aujourd'hui --------------------
+    if len(suivi):
+        vue = suivi["Lien"].astype(str).isin(liens_du_jour)
+        prix_du_jour = merged.set_index(merged["Lien"].astype(str))["Prix"]
+        suivi.loc[vue, "Derniere_Vue"] = aujourd_hui
+        suivi.loc[vue, "Prix_Dernier"] = (
+            suivi.loc[vue, "Lien"].astype(str).map(prix_du_jour).values
+        )
+
+        revenues = vue & (suivi["Statut"] == "Disparue")
+        if revenues.sum():
+            suivi.loc[revenues, "Statut"] = "Active"
+            suivi.loc[revenues, "Date_Disparition"] = pd.NA
+            suivi.loc[revenues, "Jours_En_Ligne"] = pd.NA
+            suivi.loc[revenues, "Nb_Reapparitions"] = (
+                pd.to_numeric(
+                    suivi.loc[revenues, "Nb_Reapparitions"], errors="coerce"
+                ).fillna(0) + 1
+            )
+            print(f"↩️  {int(revenues.sum())} annonce(s) réapparue(s) — remises en actif.")
+
+    # ---- Disparitions ---------------------------------------------------
+    nb_disparues = 0
+    if len(suivi) and not scraping_suspect:
+        disparues = (
+            ~suivi["Lien"].astype(str).isin(liens_du_jour)
+            & (suivi["Statut"] == "Active")
+        )
+        if sources_suspectes and "Source" in suivi.columns:
+            source_norm = suivi["Source"].fillna("<inconnue>").astype(str)
+            disparues &= ~source_norm.isin(sources_suspectes)
+
+        if disparues.sum():
+            suivi.loc[disparues, "Statut"] = "Disparue"
+            suivi.loc[disparues, "Date_Disparition"] = aujourd_hui
+            duree = (
+                pd.to_datetime(aujourd_hui)
+                - pd.to_datetime(
+                    suivi.loc[disparues, "Premiere_Vue"], errors="coerce"
+                )
+            ).dt.days
+            suivi.loc[disparues, "Jours_En_Ligne"] = duree.values
+            nb_disparues = int(disparues.sum())
+
+    _finaliser(suivi, merged, connus, aujourd_hui, nb_disparues)
 
 if __name__ == "__main__":
     mettre_a_jour()

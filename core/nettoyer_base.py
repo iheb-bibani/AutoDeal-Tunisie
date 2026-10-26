@@ -347,6 +347,14 @@ def process_data():
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
+    # -- Prix en millimes concaténés par d'anciens scrapers ("35.000,000 DT"
+    # -> 35000000) : ramenés en dinars. Les scrapers parsent désormais le prix
+    # correctement (scrapers/parsing.py) ; ceci récupère l'historique brut.
+    millimes = (df["Prix"] > 1_000_000) & (df["Prix"] % 1000 == 0) & (df["Prix"] / 1000 <= 500000)
+    if millimes.sum():
+        print(f"🔧 {int(millimes.sum())} prix en millimes ramenés en dinars.")
+    df.loc[millimes, "Prix"] = df.loc[millimes, "Prix"] / 1000
+
     # -- Prix hors plage plausible pour ce marché
     df = df[(df["Prix"] >= 3000) & (df["Prix"] <= 500000)]
 

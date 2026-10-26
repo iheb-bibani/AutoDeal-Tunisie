@@ -5,8 +5,14 @@ import re
 import csv
 import shutil
 from datetime import datetime, timedelta
+import sys
+from pathlib import Path
+
 import pandas as pd
 from playwright.sync_api import sync_playwright
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from scrapers.liens_vus import enregistrer_liens_vus  # noqa: E402
 
 # ⚙️ CONFIGURATION DE L'AUTOMATISATION
 # Sur le Cloud, mets 1 ou 2 pour ne scraper rapidement que les nouveautés et appliquer le Delta.
@@ -25,13 +31,18 @@ def parser_anciennete(texte, reference=None):
     reference = reference or datetime.now()
     texte = texte.strip().lower()
 
-    match = re.match(r"(a|an|\d+)\s+(minute|hour|day|week|month)s?\s+ago", texte)
-
-    if not match:
-        return None
-
-    qty_str, unite = match.groups()
-    qty = 1 if qty_str in ("a", "an") else int(qty_str)
+    match = re.match(r"(a|an|\d+)\s+(minute|hour|day|week|month|year)s?\s+ago", texte)
+    if match:
+        qty_str, unite = match.groups()
+    else:
+        # Interface en français : "il y a 3 jours", "il y a un mois"…
+        fr = re.match(r"il y a\s+(un|une|\d+)\s+(minute|heure|jour|semaine|mois|an)s?\b", texte)
+        if not fr:
+            return None
+        qty_str, unite_fr = fr.groups()
+        unite = {"minute": "minute", "heure": "hour", "jour": "day", "semaine": "week",
+                 "mois": "month", "an": "year"}[unite_fr]
+    qty = 1 if qty_str in ("a", "an", "un", "une") else int(qty_str)
 
     delta_map = {
         "minute": timedelta(minutes=qty),
@@ -39,6 +50,7 @@ def parser_anciennete(texte, reference=None):
         "day": timedelta(days=qty),
         "week": timedelta(weeks=qty),
         "month": timedelta(days=qty * 30),  # approximation
+        "year": timedelta(days=qty * 365),
     }
 
     return (reference - delta_map[unite]).strftime("%Y-%m-%d")
@@ -139,16 +151,19 @@ def normaliser_schema_csv_tayara(chemin=FICHIER_TAYARA):
     backup = path + ".bak"
     shutil.copy2(path, backup)
     tmp = path + ".tmp"
-    pd.DataFrame(normalisees, columns=COLONNES_FINALES).to_csv(
-        tmp, index=False, sep=";", encoding="utf-8-sig",
-        quoting=csv.QUOTE_ALL, lineterminator="\n"
-    )
-
-    # Validation stricte avant remplacement du fichier original.
-    check = pd.read_csv(tmp, sep=";", encoding="utf-8-sig", low_memory=False)
-    if list(check.columns) != COLONNES_FINALES:
-        raise RuntimeError("La migration Tayara a produit un schéma inattendu.")
-    os.replace(tmp, path)
+    try:
+        pd.DataFrame(normalisees, columns=COLONNES_FINALES).to_csv(
+            tmp, index=False, sep=";", encoding="utf-8-sig",
+            quoting=csv.QUOTE_ALL, lineterminator="\n"
+        )
+        # Validation stricte avant remplacement du fichier original.
+        check = pd.read_csv(tmp, sep=";", encoding="utf-8-sig", low_memory=False)
+        if list(check.columns) != COLONNES_FINALES:
+            raise RuntimeError("La migration Tayara a produit un schéma inattendu.")
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
     print(f"✅ tayara.csv normalisé : {len(check)} lignes. Sauvegarde : {backup}")
     if ignores:
         print(f"⚠️ {ignores} ligne(s) irrécupérable(s) ignorée(s) pendant la migration.")
@@ -186,10 +201,17 @@ def charger_liens_deja_scrapes(chemin=FICHIER_TAYARA):
         return set()
 
     try:
-        df = pd.read_csv(chemin, sep=";")
-        return set(df["Lien"].dropna())
+        df = pd.read_csv(chemin, sep=";", encoding="utf-8-sig", low_memory=False)
     except Exception:
         return set()
+    # Une fiche dont la page détail avait échoué (ni marque, ni année, ni km)
+    # n'est PAS considérée comme scrapée : elle sera retentée, et le
+    # dédoublonnage final (keep="last") gardera la version complète.
+    detail = [c for c in ("Marque", "Année", "Kilométrage") if c in df.columns]
+    if detail:
+        partielle = df[detail].isna().all(axis=1)
+        df = df[~partielle]
+    return set(df["Lien"].dropna())
 
 def scrape_tayara():
     # Corrige automatiquement un ancien tayara.csv 16 colonnes avant tout append.
@@ -201,6 +223,9 @@ def scrape_tayara():
     liens_deja_scrapes = charger_liens_deja_scrapes()
     if liens_deja_scrapes:
         print(f"↪️  Reprise : {len(liens_deja_scrapes)} annonces déjà présentes dans {FICHIER_TAYARA}, elles seront sautées.")
+
+    liens_vus: dict[str, object] = {}
+    pagination_complete = False
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -227,8 +252,9 @@ def scrape_tayara():
                 
                 try:
                     page.wait_for_selector("article.mx-0", timeout=8000)
-                except:
+                except Exception:
                     print(f"Plus d'annonces détectées ou chargement trop long. Fin à la page {page_num - 1}.")
+                    pagination_complete = page_num > 1
                     break
                 
                 articles = page.locator("article.mx-0").all()
@@ -259,6 +285,8 @@ def scrape_tayara():
                             "Lien": full_url
                         }
 
+                        if full_url:
+                            liens_vus[full_url] = price
                         if full_url in liens_deja_scrapes:
                             continue
 
@@ -273,11 +301,27 @@ def scrape_tayara():
             except Exception as e:
                 print(f"Erreur de chargement à la page {page_num}: {e}")
                 break
+        else:
+            # Plafond de pages atteint : le catalogue n'a pas été vu en entier,
+            # les annonces au-delà ne doivent pas être déclarées disparues.
+            print(f"ℹ️ Plafond de {MAX_PAGES_A_SCRAPER} pages atteint (catalogue partiel).")
+
+        if not liens_vus:
+            browser.close()
+            print("❌ Aucune annonce sur la page 1 : structure du site changée ou blocage.")
+            sys.exit(1)
+        if pagination_complete:
+            # Catalogue du jour pour le suivi des disparitions (core/suivi_annonces.py).
+            enregistrer_liens_vus("tayara", liens_vus)
+        else:
+            print("⚠️ Pagination interrompue : liens vus non publiés (pas de fausses disparitions).")
                 
         # --- VISITE DES LIENS ---
         print(f"\nVisite de {len(data_cars)} annonces individuelles pour récupérer les critères...")
+        echecs_detail = 0
         for i, car in enumerate(data_cars):
             if car["Lien"]:
+                detail_ok = False
                 try:
                     print(f"[{i+1}/{len(data_cars)}] Extraction : {car['Titre']}")
                     page.goto(car["Lien"], wait_until="domcontentloaded", timeout=20000)
@@ -341,10 +385,17 @@ def scrape_tayara():
                     car["Options"] = " | ".join(options) if options else None
                     car["Nb_Options"] = len(options) if options else None
 
+                    detail_ok = True
                     time.sleep(random.uniform(1.0, 2.0))
 
                 except Exception:
-                    pass  # même en cas d'erreur sur cette annonce, on l'enregistre avec ce qu'on a pu récupérer
+                    echecs_detail += 1
+
+                # Fiche détail en échec : on n'enregistre PAS une ligne amputée
+                # de marque/année/km (elle ne serait jamais complétée) ; le lien
+                # sera retenté au prochain run.
+                if not detail_ok:
+                    continue
 
                 # ECRITURE IMMEDIATE : au fur et à mesure, pas seulement à la fin.
                 # Si le script plante à l'annonce 1500/2171, les 1499 précédentes
@@ -353,6 +404,8 @@ def scrape_tayara():
 
         browser.close()
 
+    if echecs_detail:
+        print(f"⚠️ {echecs_detail} fiche(s) détail en échec : retentées au prochain run.")
     print(f"\n✅ Terminé : {len(data_cars)} annonces traitées et enregistrées dans {FICHIER_TAYARA}")
 
     # Filet de sécurité : dédoublonnage léger sur 'Lien', au cas où une même
@@ -365,14 +418,21 @@ def scrape_tayara():
             df_final = df_final.reindex(columns=COLONNES_FINALES)
             for col in df_final.select_dtypes(include="object").columns:
                 df_final[col] = df_final[col].map(_nettoyer_texte_csv)
-            df_final.to_csv(
-                FICHIER_TAYARA, index=False, sep=";", encoding="utf-8-sig",
-                quoting=csv.QUOTE_ALL, lineterminator="\n"
-            )
-            # Relecture immédiate : le scraper échoue ici plutôt que plus tard au quality gate.
-            verif = pd.read_csv(FICHIER_TAYARA, sep=";", encoding="utf-8-sig", low_memory=False)
-            if list(verif.columns) != COLONNES_FINALES:
-                raise RuntimeError(f"Schéma Tayara invalide après écriture : {list(verif.columns)}")
+            # Écriture dans un .tmp validé puis os.replace : un kill pendant
+            # l'écriture (timeout) ne peut plus tronquer le fichier cumulatif.
+            tmp = FICHIER_TAYARA + ".tmp"
+            try:
+                df_final.to_csv(
+                    tmp, index=False, sep=";", encoding="utf-8-sig",
+                    quoting=csv.QUOTE_ALL, lineterminator="\n"
+                )
+                verif = pd.read_csv(tmp, sep=";", encoding="utf-8-sig", low_memory=False)
+                if list(verif.columns) != COLONNES_FINALES or len(verif) != len(df_final):
+                    raise RuntimeError(f"Schéma Tayara invalide après écriture : {list(verif.columns)}")
+                os.replace(tmp, FICHIER_TAYARA)
+            finally:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
             if avant != len(df_final):
                 print(f"🧹 {avant - len(df_final)} doublons supprimés. Total : {len(df_final)} lignes.")
         except Exception as e:

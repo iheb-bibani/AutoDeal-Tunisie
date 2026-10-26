@@ -29,6 +29,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(
         sa, "FICHIER_ALERTES", str(tmp_path / "inexistant_alertes.csv")
     )
+    # Par défaut : aucun fichier de liens vus (mode historique).
+    monkeypatch.setattr(sa, "charger_liens_vus", lambda: {})
+    monkeypatch.setattr(sa, "MANIFESTE", str(tmp_path / "pas_de_manifeste.json"))
     return tmp_path, monkeypatch, suivi
 
 
@@ -105,3 +108,46 @@ def test_garde_fou_par_source_bloque_une_panne_partielle(env):
     assert df.loc["B2", "Statut"] == "Active"
     assert df.loc["B3", "Statut"] == "Active"
     assert (df["Statut"] == "Disparue").sum() == 0
+
+
+def test_liens_vus_permettent_les_disparitions_malgre_un_fichier_cumulatif(env):
+    """Le fichier fusionné est cumulatif : seules les pages de liste disent
+    ce qui est encore en ligne."""
+    tmp_path, monkeypatch, suivi = env
+    liens = [f"L{i}" for i in range(10)]
+    merged = _merged(tmp_path, liens, ["tayara.tn"] * 10)
+    monkeypatch.setitem(sa.PROCESSED_FILES, "merged", merged)
+    monkeypatch.setattr(sa, "charger_liens_vus", lambda: {"tayara": {l: "20000" for l in liens}})
+    sa.mettre_a_jour()
+
+    # Le lendemain : le fichier fusionné contient toujours les 10 liens, mais
+    # la page de liste n'en montre plus que 9 (L0 vendue, prix de L1 baissé).
+    vus = {l: "20000" for l in liens[1:]}
+    vus["L1"] = "18 500"
+    monkeypatch.setattr(sa, "charger_liens_vus", lambda: {"tayara": vus})
+    sa.mettre_a_jour()
+    df = _charger(suivi)
+    assert df.loc["L0", "Statut"] == "Disparue"
+    assert df.loc["L1", "Statut"] == "Active"
+    assert float(df.loc["L1", "Prix_Dernier"]) == 18500
+
+
+def test_source_non_observee_ou_en_echec_ne_fait_rien_disparaitre(env):
+    tmp_path, monkeypatch, suivi = env
+    liens_t = [f"T{i}" for i in range(5)]
+    liens_a = [f"A{i}" for i in range(5)]
+    merged = _merged(tmp_path, liens_t + liens_a, ["tayara.tn"] * 5 + ["automobile.tn"] * 5)
+    monkeypatch.setitem(sa.PROCESSED_FILES, "merged", merged)
+    monkeypatch.setattr(sa, "charger_liens_vus", lambda: {
+        "tayara": {l: None for l in liens_t}, "automobile": {l: None for l in liens_a}})
+    sa.mettre_a_jour()
+
+    # automobile n'a rien publié aujourd'hui ; tayara a échoué selon le manifeste.
+    import json
+    manifeste = tmp_path / "run.json"
+    manifeste.write_text(json.dumps({"scrapers": {"tayara": {"status": "timeout"}, "automax": {"status": "success"}}}))
+    monkeypatch.setattr(sa, "MANIFESTE", str(manifeste))
+    monkeypatch.setattr(sa, "charger_liens_vus", lambda: {"tayara": {}, "automax": {"X": None}})
+    sa.mettre_a_jour()
+    df = _charger(suivi)
+    assert (df["Statut"] == "Active").all()

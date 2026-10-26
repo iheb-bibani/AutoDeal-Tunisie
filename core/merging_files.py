@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import pandas as pd
 from logger import get_logger
 from config import PROCESSED_FILES, SCRAPERS, CORRECTIONS_MARQUE
-from core.regles_texte import masque_bruit
+from core.regles_texte import MARQUES_VALIDES, masque_bruit
 from utils.common import charger_dataframe_securise, sauvegarder_dataframe
 
 logger = get_logger(__name__)
@@ -65,6 +65,34 @@ def normaliser_localisation(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def assainir_autocentral(df: pd.DataFrame | None) -> pd.DataFrame | None:
+    """Neutralise les artefacts de l'ancien parseur autocentral.
+
+    Avant correction, l'extracteur remontait parfois jusqu'au conteneur de la
+    grille : des dizaines d'annonces différentes recevaient l'année, le prix et
+    le km de la PREMIÈRE carte, et le mot suivant l'année ("DSG", "Diesel"…)
+    devenait la marque. On écarte les fiches dont le contenu est répété à
+    l'identique (≥ 3 fois) et on vide les marques inconnues (elles seront
+    re-déduites du titre au nettoyage).
+    """
+    if df is None or df.empty:
+        return df
+    df = df.copy()
+    cles = [c for c in ("Marque", "Modèle", "Année", "Prix_DT", "Kilométrage") if c in df.columns]
+    if cles:
+        contenu = df[cles].astype(str).agg("|".join, axis=1)
+        repete = contenu.map(contenu.value_counts()) >= 3
+        if repete.any():
+            logger.info(f"🧹 autocentral : {int(repete.sum())} fiches au contenu dupliqué écartées (artefact de scraping)")
+        df = df[~repete]
+    if "Marque" in df.columns:
+        inconnue = df["Marque"].notna() & ~df["Marque"].astype(str).str.lower().isin(MARQUES_VALIDES)
+        df.loc[inconnue, "Marque"] = pd.NA
+        if "Modèle" in df.columns:
+            df.loc[inconnue, "Modèle"] = pd.NA
+    return df
+
+
 def fusionner_sources():
     """Charge les 3 fichiers bruts, normalise et fusionne"""
     
@@ -77,7 +105,7 @@ def fusionner_sources():
     # sayyaratn : source additionnelle, OPTIONNELLE (peut être absente au premier
     # run ou si le scraper a échoué) -> on ne bloque pas la fusion si elle manque.
     df_sayyarat = charger_dataframe_securise(SCRAPERS.get("sayyarat", ""))
-    df_autocentral = charger_dataframe_securise(SCRAPERS.get("autocentral", ""))
+    df_autocentral = assainir_autocentral(charger_dataframe_securise(SCRAPERS.get("autocentral", "")))
     
     if df_automax is None or df_auto is None or df_tayara is None:
         logger.error("❌ Une ou plusieurs sources principales sont manquantes")

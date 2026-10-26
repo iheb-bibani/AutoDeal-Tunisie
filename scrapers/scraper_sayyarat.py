@@ -34,6 +34,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import pandas as pd
 from playwright.sync_api import sync_playwright
 
+from scrapers.liens_vus import enregistrer_liens_vus
+from scrapers.parsing import parser_annee, parser_entier, parser_prix_tnd
+
 BASE = "https://www.sayyaratn.com"
 LISTE_URL = BASE + "/annonces?page={}"
 FICHIER = "data/raw/sayyarat.csv"
@@ -94,7 +97,8 @@ EXTRACTEUR_JS = r"""
   // 5) Titre + prix
   const h1 = document.querySelector('h1');
   const body = document.body ? document.body.innerText : '';
-  const m = body.match(/([\d][\d\s.,]*)\s*DT\b/);
+  // Pas de \s : un saut de ligne ne doit jamais coller deux nombres ("9,000\n45 000 DT").
+  const m = body.match(/(\d[\d .,\u00a0\u202f]*)[ \u00a0\u202f]*DT\b/);
 
   return {
     titre: t(h1),
@@ -109,14 +113,6 @@ EXTRACTEUR_JS = r"""
 
 def _na(s):
     return "".join(c for c in unicodedata.normalize("NFD", str(s)) if unicodedata.category(c) != "Mn").lower()
-
-
-def _chiffres(s):
-    """'123,333 DT' / '9,000 km' -> 123333 / 9000 (int) ou None."""
-    if not s:
-        return None
-    n = re.sub(r"[^\d]", "", str(s))
-    return int(n) if n else None
 
 
 def _get(specs, *cles):
@@ -141,13 +137,14 @@ def mapper(data, lien):
         "Titre": titre,
         "Marque": _get(specs, "marque"),
         "Modèle": _get(specs, "modele", "modèle"),
-        "Année": _chiffres(annee),
-        "Prix_DT": _chiffres(data.get("prix")),
-        "Kilométrage": _chiffres(_get(specs, "kilometrage", "kilométrage")),
+        "Année": parser_annee(annee),
+        "Prix_DT": parser_prix_tnd(f"{data.get('prix')} DT") if data.get("prix") else None,
+        "Kilométrage": parser_entier(_get(specs, "kilometrage", "kilométrage"), maxi=1_000_000),
         "Energie": _get(specs, "carburant", "energie", "énergie"),
         "Boite": _get(specs, "boite vitesse", "boîte", "boite"),
         "Localisation": data.get("localisation"),
-        "Puissance_Fiscale": _chiffres(_get(specs, "puissance fiscale", "puissance")),
+        # Pas de repli sur "puissance" : il attrapait la puissance DIN (ch).
+        "Puissance_Fiscale": parser_entier(_get(specs, "puissance fiscale"), maxi=30),
         "Etat_Vehicule": _get(specs, "etat", "état"),
         "Description": data.get("description"),
         "Annonce-Deposee": None,  # non exposé de façon fiable sur la fiche
@@ -209,30 +206,42 @@ def scraper():
             locale="fr-FR",
         )
         page = contexte.new_page()
+        liens_vus: dict[str, None] = {}
+        fin_naturelle = False
 
-        for num in range(1, MAX_PAGES + 1):
-            liens = collecter_liens(page, num)
-            if not liens:
-                print(f"Page {num} : aucune annonce -> fin de pagination.")
-                break
-            nouveaux = [l for l in liens if l not in deja]
-            print(f"Page {num} : {len(liens)} annonces, {len(nouveaux)} nouvelles.")
+        try:
+            for num in range(1, MAX_PAGES + 1):
+                liens = collecter_liens(page, num)
+                if not liens:
+                    print(f"Page {num} : aucune annonce -> fin de pagination.")
+                    fin_naturelle = num > 1
+                    break
+                liens_vus.update(dict.fromkeys(liens))
+                nouveaux = [l for l in liens if l not in deja]
+                print(f"Page {num} : {len(liens)} annonces, {len(nouveaux)} nouvelles.")
 
-            for lien in nouveaux:
-                try:
-                    page.goto(lien, wait_until="domcontentloaded", timeout=30000)
-                    page.wait_for_selector("h1", timeout=12000)
-                    data = page.evaluate(EXTRACTEUR_JS)
-                    car = mapper(data, lien)
-                    if car["Titre"] and car["Prix_DT"]:
-                        enregistrer_ligne(car)
-                        deja.add(lien)
-                        total += 1
-                except Exception as e:
-                    print(f"  ⚠️ {lien} ignorée ({type(e).__name__}).")
-                time.sleep(random.uniform(0.8, 1.8))
+                for lien in nouveaux:
+                    try:
+                        page.goto(lien, wait_until="domcontentloaded", timeout=30000)
+                        page.wait_for_selector("h1", timeout=12000)
+                        data = page.evaluate(EXTRACTEUR_JS)
+                        car = mapper(data, lien)
+                        if car["Titre"] and car["Prix_DT"]:
+                            enregistrer_ligne(car)
+                            deja.add(lien)
+                            total += 1
+                    except Exception as e:
+                        print(f"  ⚠️ {lien} ignorée ({type(e).__name__}).")
+                    time.sleep(random.uniform(0.8, 1.8))
+        finally:
+            navigateur.close()
 
-        navigateur.close()
+    if not liens_vus:
+        # Page 1 vide = site indisponible ou structure changée : échec visible.
+        print("❌ Aucune annonce sur la page 1.")
+        sys.exit(1)
+    if fin_naturelle:
+        enregistrer_liens_vus("sayyarat", liens_vus)
     print(f"✅ Terminé : {total} nouvelle(s) annonce(s) -> {FICHIER}")
 
 

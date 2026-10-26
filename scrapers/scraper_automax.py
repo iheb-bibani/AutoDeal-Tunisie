@@ -7,6 +7,17 @@ import requests
 
 from datetime import datetime
 from bs4 import BeautifulSoup
+import sys
+from pathlib import Path
+
+# Racine du projet importable (lancé en `python scrapers/xxx.py`).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core.io_atomique import ecrire_csv_atomique  # noqa: E402
+from scrapers.liens_vus import enregistrer_liens_vus  # noqa: E402
+from scrapers.parsing import parser_prix_tnd  # noqa: E402
+
+# Garde-fou : la pagination AJAX ne doit jamais tourner jusqu'au timeout.
+MAX_PAGES_AUTOMAX = 200
 
 
 # -------------------------------------------------
@@ -162,14 +173,8 @@ def scraper_details_annonce(url_annonce, session):
 
             if prix:
 
-                data["Prix_DT"] = "".join(
-
-                    filter(
-                        str.isdigit,
-                        prix.get_text()
-                    )
-
-                )
+                # "35.000,000 DT" / "42 mille DT" : voir scrapers/parsing.py
+                data["Prix_DT"] = parser_prix_tnd(prix.get_text(" ", strip=True))
 
             # DATE DE DEPOT (ex: "29 juin 2026")
 
@@ -427,69 +432,43 @@ def recuperer_annonces_page(offset, session):
                 random.uniform(5,10)
             )
 
-    return []
+    # None (et non []) : un échec réseau ne doit pas être confondu avec la
+    # fin de la pagination.
+    return None
 
 # -------------------------------------------------
 # SAUVEGARDE
 # -------------------------------------------------
 
 def sauvegarder(annonces):
+    """Ajoute les annonces en fin de fichier (append), sans relire ni réécrire
+    tout le CSV à chaque annonce (O(n²) et fichier tronqué en cas de kill).
+    Réécriture complète, atomique, seulement si le schéma change."""
 
     if not annonces:
-
         return
 
-    df_new = pd.DataFrame(
-        annonces
-    )
+    df_new = pd.DataFrame(annonces)
+    os.makedirs(os.path.dirname(FICHIER_SORTIE), exist_ok=True)
 
-    os.makedirs(
-        os.path.dirname(FICHIER_SORTIE),
-        exist_ok=True
-    )
+    existe = os.path.exists(FICHIER_SORTIE) and os.path.getsize(FICHIER_SORTIE) > 0
+    if not existe:
+        ecrire_csv_atomique(df_new, FICHIER_SORTIE)
+        return
 
-    if os.path.exists(
-        FICHIER_SORTIE
-    ):
-
-        df_old = pd.read_csv(
-            FICHIER_SORTIE,
-            sep=";"
+    colonnes = list(pd.read_csv(FICHIER_SORTIE, sep=";", encoding="utf-8-sig", nrows=0).columns)
+    if set(df_new.columns) <= set(colonnes):
+        df_new.reindex(columns=colonnes).to_csv(
+            FICHIER_SORTIE, mode="a", header=False, index=False, sep=";", encoding="utf-8-sig"
         )
+        return
 
-        df_final = pd.concat(
-            [
-                df_old,
-                df_new
-            ],
-            ignore_index=True
-        )
+    # Nouvelles colonnes : migration complète du fichier, atomique.
+    df_old = pd.read_csv(FICHIER_SORTIE, sep=";", encoding="utf-8-sig")
+    df_final = pd.concat([df_old, df_new], ignore_index=True).drop_duplicates(subset="Lien", keep="last")
+    ecrire_csv_atomique(df_final, FICHIER_SORTIE)
+    print(len(df_final), "annonces sauvegardées (schéma étendu)")
 
-    else:
-
-        df_final = df_new
-
-    df_final.drop_duplicates(
-        subset="Lien",
-        inplace=True
-    )
-
-    df_final.to_csv(
-
-        FICHIER_SORTIE,
-
-        index=False,
-
-        sep=";",
-
-        encoding="utf-8-sig"
-
-    )
-
-    print(
-        len(df_final),
-        "annonces sauvegardées"
-    )
 
 # -------------------------------------------------
 # SCRAPER PRINCIPAL
@@ -513,10 +492,11 @@ def lancer_scraper():
         FICHIER_SORTIE
     ):
 
-        df = pd.read_csv(
-            FICHIER_SORTIE,
-            sep=";"
-        )
+        try:
+            df = pd.read_csv(FICHIER_SORTIE, sep=";", encoding="utf-8-sig")
+        except Exception as exc:
+            print(f"❌ {FICHIER_SORTIE} illisible ({exc}) : arrêt pour ne pas l'aggraver.")
+            sys.exit(1)
 
         if "Lien" in df.columns:
 
@@ -530,8 +510,10 @@ def lancer_scraper():
         )
 
     offset = 0
+    liens_vus: dict[str, None] = {}
+    fin_naturelle = False
 
-    while True:
+    for _ in range(MAX_PAGES_AUTOMAX):
 
         print("="*60)
 
@@ -550,13 +532,24 @@ def lancer_scraper():
             "annonces trouvées"
         )
 
+        if liens is None:
+            print("❌ Échecs AJAX répétés : arrêt (catalogue incomplet).")
+            break
+
         if len(liens) == 0:
 
             print(
                 "Fin pagination"
             )
 
+            fin_naturelle = True
             break
+
+        if all(x in liens_vus for x in liens):
+            print("⚠️ La page renvoie uniquement des liens déjà vus : offset ignoré par le site, arrêt.")
+            break
+        for x in liens:
+            liens_vus[x] = None
 
         nouvelles = [
 
@@ -598,6 +591,14 @@ def lancer_scraper():
         offset += 12
 
     print("=" * 60)
+
+    if not liens_vus:
+        print("❌ Aucune annonce collectée (site indisponible ou structure changée).")
+        sys.exit(1)
+    if fin_naturelle:
+        enregistrer_liens_vus("automax", liens_vus)
+    else:
+        print("⚠️ Catalogue incomplet : liens vus non publiés.")
 
     print(
         "SCRAPING TERMINE"

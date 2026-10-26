@@ -10,7 +10,13 @@ import unicodedata
 
 import pandas as pd
 
-from config import LONGUEUR_TITRE_COURT, MOTS_BRUIT_PARTOUT, MOTS_BRUIT_TITRE_COURT
+from config import (
+    LONGUEUR_TITRE_COURT,
+    MARQUES_ALIAS,
+    MODELES_PAR_MARQUE_REFERENTIEL,
+    MOTS_BRUIT_PARTOUT,
+    MOTS_BRUIT_TITRE_COURT,
+)
 
 
 def sans_accents(s) -> str:
@@ -59,3 +65,14 @@ def masques_accident(texte: pd.Series) -> tuple[pd.Series, pd.Series]:
     reste = t.str.replace(NEGATION_ACCIDENT, " ", regex=True)
     reelle = reste.str.contains(MOTIF_ACCIDENT, regex=True, na=False)
     return reelle, saine
+
+
+def _marques_valides() -> dict[str, str]:
+    """minuscule -> libellé canonique, à partir du référentiel de config."""
+    connues = {k.lower(): v for k, v in MARQUES_ALIAS.items()}
+    for v in list(MARQUES_ALIAS.values()) + list(MODELES_PAR_MARQUE_REFERENTIEL):
+        connues.setdefault(str(v).lower(), v)
+    return connues
+
+
+MARQUES_VALIDES = _marques_valides()

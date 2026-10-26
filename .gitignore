@@ -24,3 +24,7 @@ logs/
 *.bak
 .pytest_cache/
 .ruff_cache/
+*.tmp
+.*.tmp
+# Liens vus par run (consommés dans le même run par core/suivi_annonces.py)
+data/raw/vus/
