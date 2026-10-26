@@ -438,28 +438,37 @@ def charger_deals():
         return None
 
 
+def _bundle_valide(bundle):
+    return isinstance(bundle, dict) and "pipeline" in bundle
+
+
 def _tenter_charger_modele():
     """Tente de charger le modèle et RENVOIE (bundle, message_erreur) sans
     rien avaler : sert au diagnostic quand le calculateur n'a pas de modèle.
-    Essaie d’abord le disque local (le repo est déjà cloné par Streamlit), puis GitHub en secours."""
+
+    Même ordre de priorité que les CSV (``lire_csv``) : GitHub d'abord, disque
+    local en secours. Charger le pickle local en premier faisait scorer les
+    données fraîches (lues sur GitHub) avec le modèle figé au dernier
+    redémarrage de Streamlit Cloud."""
     erreurs = []
-    try:
-        bundle = joblib.load(MODELE_PATH)
-        if isinstance(bundle, dict) and "pipeline" in bundle:
-            return bundle, None
-        erreurs.append("local : format de modèle inattendu (pas de clé 'pipeline').")
-    except Exception as e:
-        erreurs.append(f"local : {type(e).__name__} — {str(e)[:200]}")
     if LIRE_DEPUIS_GITHUB:
         try:
-            import io, urllib.request
+            import io
+            import urllib.request
             with urllib.request.urlopen(_url(MODELE_PATH), timeout=30) as r:
                 bundle = joblib.load(io.BytesIO(r.read()))
-            if isinstance(bundle, dict) and "pipeline" in bundle:
+            if _bundle_valide(bundle):
                 return bundle, None
             erreurs.append("GitHub : format de modèle inattendu (pas de clé 'pipeline').")
         except Exception as e:
             erreurs.append(f"GitHub : {type(e).__name__} — {str(e)[:200]}")
+    try:
+        bundle = joblib.load(MODELE_PATH)
+        if _bundle_valide(bundle):
+            return bundle, None
+        erreurs.append("local : format de modèle inattendu (pas de clé 'pipeline').")
+    except Exception as e:
+        erreurs.append(f"local : {type(e).__name__} — {str(e)[:200]}")
     return None, " | ".join(erreurs)
 
 
@@ -1799,7 +1808,6 @@ def page_calculateur(df, bundle):
     st.caption(f"Segment déduit : **{segment}** — Presque neuve : **{'Oui' if presque_neuve else 'Non'}**")
 
     if st.button("Calculer le prix théorique", type="primary"):
-        colonnes = bundle.get("features_numeriques", []) + bundle.get("features_categorielles", [])
         saisie = {
             "Kilométrage": km, "Log_Kilometrage": float(np.log1p(km)),
             "Age_Vehicule": max(annee_courante - annee, 0),

@@ -1,4 +1,3 @@
-import pandas as pd
 from core.market_valuation import MarketValuation
 from core.product_insights import valuation_confidence
 

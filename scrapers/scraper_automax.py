@@ -305,7 +305,8 @@ def scraper_details_annonce(url_annonce, session):
 
             print(
                 f"Tentative {tentative}/3 échouée :",
-                url_annonce
+                url_annonce,
+                f"({type(e).__name__}: {e})",
             )
 
             time.sleep(

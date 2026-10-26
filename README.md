@@ -4,7 +4,7 @@
 
 **Plateforme d'intelligence du marché automobile tunisien : collecte multi-sources, estimation ML, comparables réels, détection d'opportunités, API et monitoring de fiabilité.**
 
-![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white)
 ![Streamlit](https://img.shields.io/badge/Streamlit-frontend-FF4B4B?logo=streamlit&logoColor=white)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-1.8.0-F7931E?logo=scikitlearn&logoColor=white)
@@ -351,7 +351,7 @@ Pour un nouveau projet, exécuter `supabase/schema.sql`, puis configurer les sec
 
 ## Installation locale
 
-Prérequis : Python 3.11 recommandé, Git et Chromium pour les scrapers.
+Prérequis : Python 3.12 recommandé (aligné sur runtime.txt et la CI), Git et Chromium pour les scrapers.
 
 ```bash
 git clone https://github.com/iheb-bibani/AutoDeal-Tunisie.git

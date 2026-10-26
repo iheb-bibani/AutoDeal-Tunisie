@@ -30,7 +30,7 @@ from services.supabase_service import (  # noqa: E402
     current_access_context,
     is_configured as supabase_is_configured,
 )
-from web.routes import BY_LABEL, ROUTES, Route  # noqa: E402
+from web.routes import ROUTES, Route  # noqa: E402
 
 
 PAGE_RENDERERS = {

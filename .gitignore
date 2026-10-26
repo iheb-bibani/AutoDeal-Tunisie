@@ -19,3 +19,8 @@ user_data/
 # à chaque commit automatique et polluent l'historique.
 logs/
 *.log
+
+# Sauvegardes temporaires des scrapers (ex. tayara.csv.bak)
+*.bak
+.pytest_cache/
+.ruff_cache/

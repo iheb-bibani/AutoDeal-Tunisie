@@ -4,7 +4,6 @@ Script de diagnostic pour tester et dépanner le modèle sauvegardé
 """
 
 import os
-import sys
 import joblib
 import pandas as pd
 import numpy as np
@@ -129,14 +128,14 @@ def verifier_donnees_entrainement():
             logger.error(f"❌ Colonnes manquantes: {manquantes}")
             return False
         
-        logger.info(f"✅ Toutes les colonnes présentes")
+        logger.info("✅ Toutes les colonnes présentes")
         
         # Vérifier les valeurs nulles
         nulls = df[colonnes_attendues].isna().sum()
         if (nulls > 0).any():
             logger.warning(f"⚠️ Valeurs nulles détectées:\n{nulls[nulls > 0]}")
         
-        logger.info(f"✅ Données valides pour réentraînement")
+        logger.info("✅ Données valides pour réentraînement")
         return True
         
     except Exception as e:

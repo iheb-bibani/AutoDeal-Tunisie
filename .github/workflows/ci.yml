@@ -24,10 +24,10 @@ jobs:
       - name: Récupérer le dépôt
         uses: actions/checkout@v4
 
-      - name: Installer Python 3.11
+      - name: Installer Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: pip
 
       - name: Installer les dépendances
@@ -56,13 +56,12 @@ jobs:
           PY
 
       - name: Tests pytest
-        run: python -m pytest tests/ -q
+        run: python -m pytest -q
 
       - name: Cohérence du dépôt (config / modèle / contrats)
         run: python verifier_sync.py
 
-      - name: Lint Ruff (informatif)
-        continue-on-error: true
+      - name: Lint Ruff (bloquant, règles dans pyproject.toml)
         run: |
           pip install ruff
           ruff check . --output-format=github

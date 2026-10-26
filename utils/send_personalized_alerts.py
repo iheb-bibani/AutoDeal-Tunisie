@@ -18,6 +18,7 @@ import os  # noqa: E402
 import smtplib  # noqa: E402
 import ssl  # noqa: E402
 from email.message import EmailMessage  # noqa: E402
+from functools import partial  # noqa: E402
 
 import pandas as pd  # noqa: E402
 import requests  # noqa: E402
@@ -161,7 +162,7 @@ def main():
         settings = settings_by_user.get(user_id, {})
         delivered = db.table("alert_deliveries").select("listing_url,channel").eq("alert_id", alert["id"]).execute().data or []
         done = {(str(x["listing_url"]), str(x["channel"])) for x in delivered}
-        matches = deals[deals.apply(lambda r: _match(r, alert), axis=1)]
+        matches = deals[deals.apply(_match, axis=1, args=(alert,))]
 
         for _, row in matches.iterrows():
             link = str(row.get("Lien", "")).strip()
@@ -170,9 +171,9 @@ def main():
             text = _message_text(row, alert.get("name") or "Mon alerte")
             channels = []
             if alert.get("telegram_enabled") and settings.get("telegram_enabled") and settings.get("telegram_chat_id"):
-                channels.append(("telegram", lambda: send_telegram(settings["telegram_chat_id"], text)))
+                channels.append(("telegram", partial(send_telegram, settings["telegram_chat_id"], text)))
             if alert.get("email_enabled") and settings.get("email_enabled", True) and settings.get("email"):
-                channels.append(("email", lambda: send_email(settings["email"], row, alert.get("name") or "Mon alerte")))
+                channels.append(("email", partial(send_email, settings["email"], row, alert.get("name") or "Mon alerte")))
 
             for channel, sender in channels:
                 if (link, channel) in done:

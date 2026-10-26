@@ -7,9 +7,6 @@ comparateur, historique du marché et alertes.
 from __future__ import annotations
 
 import html
-import json
-from pathlib import Path
-from urllib.parse import urlparse
 
 import numpy as np
 import pandas as pd
@@ -18,7 +15,7 @@ import plotly.express as px
 
 from core.market_valuation import market_valuation, compare_ml_to_market
 from core.product_insights import explain_price, valuation_confidence
-from core.access_control import PLAN_CATALOG, ROLE_LABELS, access_badge, effective_plan, subscription_is_active
+from core.access_control import PLAN_CATALOG, ROLE_LABELS, effective_plan, subscription_is_active
 from services.payment_provider import checkout_availability, start_checkout
 
 from services.supabase_service import (
@@ -784,7 +781,6 @@ def page_compte(df=None):
 
     client = _auth_client()
     if client is None:
-        mode = st.session_state.get("auth_mode", "login")
         tabs = st.tabs(["🔐 Connexion", "✨ Créer un compte", "🔑 Mot de passe oublié"])
 
         with tabs[0]:
