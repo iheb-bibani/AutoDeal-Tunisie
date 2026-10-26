@@ -8,6 +8,7 @@ import joblib
 import pandas as pd
 import numpy as np
 from logger import get_logger
+from core.inference import preparer_lignes
 from config import PROCESSED_FILES, MODEL_PATH, FEATURES_NUMERIQUES, FEATURES_CATEGORIELLES
 
 logger = get_logger(__name__)
@@ -62,31 +63,33 @@ def tester_modele():
     logger.info("\n🔬 Test de prédiction...")
     
     try:
-        # Créer des données test
+        # Données test : TOUTES les features du modèle, calculées comme en
+        # production (l'ancienne version fournissait des colonnes obsolètes,
+        # tout était imputé et le test « réussissait » sans rien vérifier).
+        age = 6
+        km = 80000
         test_data = {
-            "Kilométrage": 80000,
-            "Année": 2020,
-            "Puissance_Fiscale": 7,
-            "Segment_Vehicule": 0,
-            "Est_Presque_Neuve": 0,
-            "Zone_Economique": 0,
-            "Marque": "Peugeot",
-            "Modèle": "3008",
-            "Boite_Vitesse": "Automatique",
-            "Energie": "Diesel",
+            "Kilométrage": km, "Log_Kilometrage": float(np.log1p(km)),
+            "Age_Vehicule": age, "Age_Carre": age ** 2, "Km_Par_An": km / age,
+            "Puissance_Fiscale": 7, "Cylindree": 1.6, "Segment_Vehicule": 0,
+            "Marque": "Peugeot", "Modèle": "3008",
+            "Boite_Vitesse": "Automatique", "Energie": "Diesel",
         }
-        
         colonnes = features_num + features_cat
-        X = pd.DataFrame([{c: test_data.get(c) for c in colonnes}])
-        
+        manquantes = [c for c in colonnes if c not in test_data]
+        if manquantes:
+            logger.error(f"❌ Features du modèle absentes des données test : {manquantes}")
+            return False
+
+        X = preparer_lignes(modele_bundle, test_data)
         logger.info(f"Données test: {X.to_dict('records')[0]}")
-        
-        # Prédiction
-        prix_log = modele_bundle["pipeline"].predict(X)[0]
-        prix_theorique = np.expm1(prix_log)
-        
+
+        prix_theorique = float(np.expm1(modele_bundle["pipeline"].predict(X)[0]))
         logger.info(f"✅ Prédiction réussie: {prix_theorique:,.0f} DT")
-        
+        if not 20_000 <= prix_theorique <= 300_000:
+            logger.error("❌ Prix implausible pour une Peugeot 3008 diesel de 6 ans.")
+            return False
+
     except AttributeError as e:
         logger.error(f"❌ Erreur AttributeError (incompatibilité sklearn): {e}")
         logger.warning("💡 Le modèle a été entraîné avec une version différente de scikit-learn")

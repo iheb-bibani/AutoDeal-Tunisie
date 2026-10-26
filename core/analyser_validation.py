@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 
 from config import PROCESSED_FILES, SEUIL_DEAL_MIN, SEUIL_DEAL_MAX, COMPARABLES_MIN_POUR_ALERTE
+from core.detect_deals import annonces_exclues
 
 FICHIER_SUIVI = "data/processed/suivi_annonces.csv"
 
@@ -36,7 +37,12 @@ def analyse_transversale(df: pd.DataFrame) -> None:
     print("1. VALIDATION TRANSVERSALE (plausibilité, disponible aujourd'hui)")
     print("=" * 64)
 
-    deals = df[df["Score_Opportunite"].between(SEUIL_DEAL_MIN, SEUIL_DEAL_MAX)]
+    # Même population que les deals publiés : fenêtre de décote ET exclusions
+    # métier (accident, pièces, papiers…), sinon on valide autre chose.
+    dans_fenetre = df["Score_Opportunite"].between(SEUIL_DEAL_MIN, SEUIL_DEAL_MAX)
+    if "Titre" in df.columns:
+        dans_fenetre &= ~annonces_exclues(df["Titre"], df["Description"] if "Description" in df.columns else None)
+    deals = df[dans_fenetre]
     taux = len(deals) / len(df) if len(df) else 0
     print(f"Marché scoré : {len(df)} | deals [{SEUIL_DEAL_MIN:.0%}-{SEUIL_DEAL_MAX:.0%}] : "
           f"{len(deals)} ({taux:.1%})")
@@ -108,7 +114,9 @@ def analyse_longitudinale(suivi: pd.DataFrame) -> None:
     libelles = ["< 25k", "25–50k", "50–100k", "100k +"]
     strate = pd.cut(prix, bins=bornes, labels=libelles)
 
-    valide = duree.notna() & (duree >= 0) & strate.notna()
+    # Une disparition le jour même de la première vue (durée 0) vient du
+    # démarrage du suivi ou d'un artefact de scraping, pas d'une vente : exclue.
+    valide = duree.notna() & (duree >= 0) & strate.notna() & ~(disparue & (duree == 0))
     d = pd.DataFrame({
         "duree": duree, "event": event.astype(int),
         "deal": est_deal.astype(int), "strate": strate.astype(str),
