@@ -28,8 +28,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
 
+from core.io_atomique import ecrire_csv_atomique
+from core.regles_texte import masque_bruit, masques_accident
 from config import (
-    PROCESSED_FILES, MAX_DAYS_OLD, MOTS_BRUIT,
+    PROCESSED_FILES, MAX_DAYS_OLD,
     MARQUES_ALIAS, MODELE_IMPLIQUE_MARQUE, MODELES_PAR_MARQUE_REFERENTIEL,
 )
 
@@ -136,11 +138,19 @@ def construire_devineur_modele(modeles_connus_par_marque):
             if match:
                 return f"Classe {match.group(1).upper()}"
 
-        # Niveau 1 : modèle du catalogue présent dans le titre (mot entier)
+        # Niveau 1 : modèle du catalogue présent dans le titre (mot entier).
+        # On garde la correspondance la plus à GAUCHE (puis la plus longue) :
+        # le catalogue trié par longueur seule renvoyait "2008" pour
+        # "Peugeot 301 2008", où 2008 est l'année.
         candidats = catalogue.get(marque, [])
+        trouves = []
         for modele in candidats:
-            if re.search(rf"(?i)(?<![a-z0-9]){re.escape(modele)}(?![a-z0-9])", titre):
-                return modele
+            m = re.search(rf"(?i)(?<![a-z0-9]){re.escape(modele)}(?![a-z0-9])", titre)
+            if m:
+                trouves.append((m.start(), -len(modele), modele))
+        if trouves:
+            non_annees = [t for t in trouves if not re.fullmatch(r"(?:19|20)\d\d", t[2])]
+            return min(non_annees or trouves)[2]
 
         # Niveau 1b : repli insensible aux espaces/tirets ("Golf7", "grand-i10").
         # On a perdu les frontières de mots en retirant séparateurs : un `in`
@@ -245,9 +255,7 @@ def process_data():
         df.loc[mask_autres, col] = pd.NA
 
     # -- Bruit : immobilier, pièces détachées, locations, pages non-annonces
-    mask_bruit = df["Titre"].astype(str).str.contains(
-        "|".join(MOTS_BRUIT), case=False, na=False
-    )
+    mask_bruit = masque_bruit(df["Titre"])
     if mask_bruit.sum():
         print(f"🧹 {mask_bruit.sum()} annonces filtrées (immobilier, pièces, locations, pages parasites).")
     df = df[~mask_bruit]
@@ -260,9 +268,9 @@ def process_data():
                   df.get("Description", pd.Series("", index=df.index)).fillna("").astype(str)).str.lower()
     motif_hs = r"\b[eé]pave\b|sans carte grise|pour pi[eè]ces|moteur\s+hs|non\s+roulant|[aà]\s+r[eé]parer|sinistr[eé]"
     mask_hs = texte_etat.str.contains(motif_hs, regex=True, na=False)
-    mention_accident = texte_etat.str.contains(r"accident[eé]", regex=True, na=False)
-    mention_saine = texte_etat.str.contains(r"non\s+accident|jamais\s+accident|aucun\s+accident|pas\s+accident", regex=True, na=False)
-    mask_hs |= mention_accident & ~mention_saine
+    # « jamais été accidentée », « zéro accident »… ne sont pas des accidents.
+    mention_accident, _ = masques_accident(texte_etat)
+    mask_hs |= mention_accident
     if mask_hs.sum():
         print(f"🧹 {mask_hs.sum()} véhicules non standards écartés du modèle de marché (épave/accident/papiers/HS).")
     df = df[~mask_hs]
@@ -385,7 +393,7 @@ def process_data():
     # -- Fraîcheur : base "recent" limitée à MAX_DAYS_OLD jours
     df_recent = df[df["Age_Annonce_Jours"] <= MAX_DAYS_OLD].copy()
 
-    df_recent.to_csv(PROCESSED_FILES["recent"], index=False, sep=";", encoding="utf-8-sig")
+    ecrire_csv_atomique(df_recent, PROCESSED_FILES["recent"])
 
     print("-" * 30)
     print(f"Annonces totales après nettoyage : {len(df)}")

@@ -90,7 +90,8 @@ MARQUES_LUXE = [
 ]
 
 GRAND_TUNIS = [
-    "Tunis", "Ariana", "Ben Arous", "Manouba"
+    # "La Manouba" est le libellé produit par la normalisation .title()
+    "Tunis", "Ariana", "Ben Arous", "Manouba", "La Manouba"
 ]
 
 # Corrections de marques (normalisations)
@@ -112,21 +113,32 @@ CORRECTIONS_MARQUE = {
 # ============================================================================
 # Source UNIQUE, importée par merging_files.py ET nettoyer_base.py. Avant,
 # chaque module avait sa propre liste et elles divergeaient silencieusement.
-MOTS_BRUIT = [
+# Mots "bruit" répartis par catégorie. Le filtre (core/regles_texte.py) les
+# cherche en MOT ENTIER (avant : sous-chaîne, "cité" éliminait les annonces
+# mentionnant l'électricité ou la sécurité). Les mots de pièces/accessoires ne
+# comptent que sur un titre COURT : une vraie annonce de voiture détaille
+# souvent "jantes alu", "sièges cuir", "climatiseur", "kit embrayage neuf".
+MOTS_BRUIT_PARTOUT = [
     # Immobilier (vraies annonces immo glissées dans la catégorie voiture de tayara)
-    "terrain", "maison", "appartement", "villa", "duplex", "studio", "triplex",
-    "hammam", "cité", "immeuble", "local commercial", "m²", "m2 ",
+    "terrain", "appartement", "villa", "duplex", "studio", "triplex",
+    "hammam", "cité", "immeuble", "local commercial", "m²", "m2",
+    # Pas des ventes de voitures particulières
+    "location", "louer", "camion", "remorque", "moto", "scooter",
+    # Pages non-annonces capturées par erreur par le scraper automobile.tn
+    "présentation de la cote",
+]
+MOTS_BRUIT_TITRE_COURT = [
+    "maison",
     # Pièces détachées et accessoires
     "chaise", "pièce", "piece de rechange", "rechange", "accessoire", "siège",
     "alternateur", "demarreur", "démarreur", "compresseur", "climatiseur",
     "kit embrayage", "embrayage", "amortisseur", "pare choc", "pare-choc",
     "jantes", "boujie", "bougie", "radiateur", "turbo à vendre",
     "autoradio", "antenne", "jouet", "enfant",
-    # Pas des ventes de voitures particulières
-    "location", "louer", "camion ", "remorque", "moto ", "scooter",
-    # Pages non-annonces capturées par erreur par le scraper automobile.tn
-    "présentation de la cote",
 ]
+LONGUEUR_TITRE_COURT = 60
+# Compatibilité : liste complète.
+MOTS_BRUIT = MOTS_BRUIT_PARTOUT + MOTS_BRUIT_TITRE_COURT
 
 # ============================================================================
 # RÉFÉRENTIEL MARQUES / MODÈLES (inférence depuis les titres)

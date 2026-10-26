@@ -29,9 +29,44 @@ def test_modele_utilise_les_features_de_config():
 
 
 def test_mots_bruit_partages_entre_modules():
+    import core.merging_files as mf
     import core.nettoyer_base as n
-    import core.merging_files  # noqa: F401  (importé pour vérifier qu'il charge)
-    assert n.MOTS_BRUIT is config.MOTS_BRUIT
+    import core.regles_texte as rt
+    # Fusion et nettoyage utilisent LE MÊME filtre, construit depuis config.
+    assert n.masque_bruit is rt.masque_bruit
+    assert mf.masque_bruit is rt.masque_bruit
+    assert config.MOTS_BRUIT == config.MOTS_BRUIT_PARTOUT + config.MOTS_BRUIT_TITRE_COURT
+
+
+def test_bruit_en_mot_entier_et_pieces_sur_titre_court():
+    import pandas as pd
+    from core.regles_texte import masque_bruit
+
+    titres = pd.Series([
+        "Location voiture",
+        "PIÈCES VOITURE",
+        "Clio 4 sécurité et électricité ok",
+        "Honda City 2021 69 mille km (entretien maison Honda), jantes alu, sièges cuir",
+        "terrain 500 m²",
+    ])
+    assert masque_bruit(titres).tolist() == [True, True, False, False, True]
+
+
+def test_negations_accident():
+    import pandas as pd
+    from core.regles_texte import masques_accident
+
+    reelle, saine = masques_accident(pd.Series(["jamais été accidentée", "voiture accidentée", "zéro accident"]))
+    assert reelle.tolist() == [False, True, False]
+    assert saine.tolist() == [True, False, True]
+
+
+def test_modele_ne_confond_pas_annee_et_modele():
+    from core.nettoyer_base import construire_devineur_modele
+
+    deviner = construire_devineur_modele({"Peugeot": ["301", "2008", "3008"]})
+    assert deviner("Peugeot", "Peugeot 301 2008 diesel") == "301"
+    assert deviner("Peugeot", "Peugeot 2008 GT line") == "2008"
 
 
 def test_features_config_presentes_dans_le_fichier_enrichi():

@@ -12,7 +12,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
 from logger import get_logger
-from config import PROCESSED_FILES, SCRAPERS, CORRECTIONS_MARQUE, MOTS_BRUIT
+from config import PROCESSED_FILES, SCRAPERS, CORRECTIONS_MARQUE
+from core.regles_texte import masque_bruit
 from utils.common import charger_dataframe_securise, sauvegarder_dataframe
 
 logger = get_logger(__name__)
@@ -107,14 +108,18 @@ def fusionner_sources():
     # (relances, appends successifs), on garde la version la plus récente.
     avant_dedup = len(df_final)
     if "Annonce-Detectee" in df_final.columns:
-        df_final = df_final.sort_values("Annonce-Detectee")
+        # Tri chronologique STABLE ; les dates manquantes en premier pour que
+        # la version datée la plus récente gagne (keep="last").
+        df_final = df_final.assign(
+            _date=pd.to_datetime(df_final["Annonce-Detectee"], errors="coerce")
+        ).sort_values("_date", kind="stable", na_position="first").drop(columns="_date")
     df_final = df_final.drop_duplicates(subset=["Lien"], keep="last")
     nb_doublons = avant_dedup - len(df_final)
     if nb_doublons:
         logger.info(f"🧹 {nb_doublons} doublons (même Lien) supprimés")
     
     # Filtrage du bruit -- MOTS_BRUIT partagé avec nettoyer_base.py (config)
-    mask_bruit = df_final['Titre'].astype(str).str.contains('|'.join(MOTS_BRUIT), case=False, na=False)
+    mask_bruit = masque_bruit(df_final['Titre'])
     nb_bruit = mask_bruit.sum()
     if nb_bruit:
         logger.info(f"🧹 {nb_bruit} annonces filtrées (bruit: pièces, immobilier, jouets...)")
@@ -146,4 +151,6 @@ def fusionner_sources():
 
 
 if __name__ == "__main__":
-    fusionner_sources()
+    # Code retour non nul si la fusion échoue : sinon main.py continuait sur le
+    # fichier fusionné de la VEILLE comme si tout allait bien.
+    sys.exit(0 if fusionner_sources() is not None else 1)

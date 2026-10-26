@@ -35,6 +35,8 @@ import numpy as np
 import pandas as pd
 
 from config import PROCESSED_FILES, MARQUES_LUXE, GRAND_TUNIS
+from core.io_atomique import ecrire_csv_atomique
+from core.regles_texte import NEGATION_ACCIDENT
 
 
 def _sans_accents(s: str) -> str:
@@ -46,7 +48,8 @@ def _sans_accents(s: str) -> str:
 # écrits sans accents car on normalise le texte avant de matcher.
 MOTIFS_ETAT = {
     "Premiere_Main": r"1\s*ere?\s*main|premiere main|1ere main|1er main",
-    "Non_Accidentee": r"jamais accident|non accident|pas accident|aucun accident|non accidentee",
+    # Voir core.regles_texte.NEGATION_ACCIDENT (« jamais été accidentée »…).
+    "Non_Accidentee": NEGATION_ACCIDENT,
     "Full_Options": r"full\s*option|toutes?\s*options?|ttes?\s*option|tte\s*option",
     "Etat_Origine": r"etat d.?origine|peinture d.?origine|tout.? d.?origine|etats? d.?origine",
 }
@@ -106,7 +109,14 @@ def enrichir():
         titre.str.extract(r"(\d{2,3})\s*cv", flags=re.IGNORECASE, expand=False), errors="coerce"
     )
     df.loc[~df["Puissance_DIN"].between(40, 700), "Puissance_DIN"] = np.nan
-    df["Cylindree"] = pd.to_numeric(titre.str.extract(r"\b(\d\.\d)\b", expand=False), errors="coerce")
+    # Cylindrée : un "d.d" suivi d'un contexte moteur (1.6 TDI, 2.0L, 1.2 PureTech).
+    # Le premier "d.d" du titre était souvent un nom de version ("Golf 7.5 1.6 TDI" -> 7.5).
+    motif_moteur = (
+        r"\b(\d\.\d)\s*(?:l\b|litres?\b|tsi|tdi|tfsi|fsi|hdi|bluehdi|dci|vti|thp|puretech|mpi|crdi|"
+        r"d-?4d|tce|gdi|t-?gdi|ecoboost|multijet|jtd|v\d|i\b|d\b|16v|8v|turbo|essence|diesel)"
+    )
+    cyl_ctx = titre.str.extract(motif_moteur, flags=re.IGNORECASE, expand=False)
+    df["Cylindree"] = pd.to_numeric(cyl_ctx, errors="coerce")
     df.loc[~df["Cylindree"].between(0.6, 8.0), "Cylindree"] = np.nan
 
     # Drapeaux d'état, dérivés du texte de l'annonce : "Description" si les
@@ -118,7 +128,7 @@ def enrichir():
     for col, valeurs in deriver_drapeaux_etat(source_texte).items():
         df[col] = valeurs
 
-    df.to_csv(PROCESSED_FILES["enriched"], index=False, sep=";", encoding="utf-8-sig")
+    ecrire_csv_atomique(df, PROCESSED_FILES["enriched"])
     print(f"Base enrichie : {len(df)} annonces -> {PROCESSED_FILES['enriched']}")
 
 

@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import pandas as pd
 
 from core.doublons import cle_doublon
+from core.regles_texte import NEGATION_ACCIDENT
 from core.io_atomique import ecrire_csv_atomique
 from config import (
     COMPARABLES_MIN_POUR_ALERTE,
@@ -62,9 +63,9 @@ def _sans_accents(s):
 # arguments de vente, pas des défauts. Sans ce nettoyage, ajouter la
 # description aux motifs exclurait surtout de bonnes annonces.
 NEGATIONS_RASSURANTES = (
-    r"(?:non|jamais|aucun\w*|pas|sans|zero|0)\s+(?:(?:ete|d')\s*)?(?:d'\s*)?accident\w*"
-    r"|rien\s+a\s+refaire"
-    r"|aucun\w*\s+(?:frais|travaux)\s+a\s+(?:prevoir|refaire)"
+    NEGATION_ACCIDENT
+    + r"|rien\s+a\s+refaire"
+    + r"|aucun\w*\s+(?:frais|travaux)\s+a\s+(?:prevoir|refaire)"
 )
 
 
