@@ -89,9 +89,10 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
-    allow_credentials=True,
+    # API publique sans cookie ni session : pas de credentials cross-origin.
+    allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "Accept"],
 )
 
 
@@ -140,8 +141,8 @@ def market_summary(
 
 @app.get("/api/v1/listings", tags=["listings"])
 def listings(
-    brand: str | None = None,
-    model: str | None = None,
+    brand: Annotated[str | None, Query(max_length=64)] = None,
+    model: Annotated[str | None, Query(max_length=64)] = None,
     max_price: Annotated[float | None, Query(gt=0)] = None,
     min_year: Annotated[int | None, Query(ge=1980, le=2100)] = None,
     max_mileage_km: Annotated[float | None, Query(ge=0)] = None,
@@ -174,14 +175,20 @@ def listings(
             >= min_opportunity_pct / 100.0
         ]
 
+    # Tri sur des clés typées : une colonne relue en texte se trierait sinon
+    # lexicographiquement ("9000" > "45000").
     if sort == "price_asc" and "Prix" in d.columns:
-        d = d.sort_values("Prix", ascending=True)
+        d = d.sort_values("Prix", ascending=True, key=lambda s: pd.to_numeric(s, errors="coerce"))
     elif sort == "price_desc" and "Prix" in d.columns:
-        d = d.sort_values("Prix", ascending=False)
+        d = d.sort_values("Prix", ascending=False, key=lambda s: pd.to_numeric(s, errors="coerce"))
     elif sort == "newest" and "Annonce-Detectee" in d.columns:
-        d = d.sort_values("Annonce-Detectee", ascending=False)
+        d = d.sort_values(
+            "Annonce-Detectee", ascending=False, key=lambda s: pd.to_datetime(s, errors="coerce", utc=True)
+        )
     elif "Score_Opportunite" in d.columns:
-        d = d.sort_values("Score_Opportunite", ascending=False)
+        d = d.sort_values(
+            "Score_Opportunite", ascending=False, key=lambda s: pd.to_numeric(s, errors="coerce")
+        )
 
     total = int(len(d))
     d = d.iloc[offset : offset + limit]
@@ -230,7 +237,7 @@ def deals(
             >= min_comparables
         ]
     if "Score_Opportunite" in d.columns:
-        d = d.sort_values("Score_Opportunite", ascending=False)
+        d = d.sort_values("Score_Opportunite", ascending=False, key=lambda s: pd.to_numeric(s, errors="coerce"))
     total = int(len(d))
     columns = [
         c

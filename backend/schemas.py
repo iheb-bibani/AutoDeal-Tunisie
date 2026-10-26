@@ -5,13 +5,13 @@ from pydantic import BaseModel, Field
 
 
 class ComparableRequest(BaseModel):
-    brand: str = Field(min_length=1, examples=["Peugeot"])
-    model: str = Field(min_length=1, examples=["208"])
+    brand: str = Field(min_length=1, max_length=64, examples=["Peugeot"])
+    model: str = Field(min_length=1, max_length=64, examples=["208"])
     year: int | None = Field(default=None, ge=1980, le=2100)
     mileage_km: float | None = Field(default=None, ge=0, le=1_500_000)
-    fuel: str | None = None
-    gearbox: str | None = None
-    listing_url: str | None = None
+    fuel: str | None = Field(default=None, max_length=32)
+    gearbox: str | None = Field(default=None, max_length=32)
+    listing_url: str | None = Field(default=None, max_length=512)
     min_comparables: int = Field(default=5, ge=3, le=30)
     max_comparables: int = Field(default=40, ge=5, le=100)
 

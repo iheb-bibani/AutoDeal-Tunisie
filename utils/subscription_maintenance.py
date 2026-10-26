@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import smtplib
+import ssl
 import sys
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -37,60 +39,106 @@ def _send_email(to: str, subject: str, body: str) -> bool:
     msg.set_content(body)
     port = int(os.getenv("SMTP_PORT", "587"))
     with smtplib.SMTP(host, port, timeout=20) as smtp:
-        smtp.starttls()
+        smtp.starttls(context=ssl.create_default_context())
         smtp.login(user, password)
         smtp.send_message(msg)
     return True
+
+
+class DeliveryError(RuntimeError):
+    """Erreur d'envoi SANS détail sensible (jamais d'URL contenant le token)."""
+
+
+_TOKEN_RE = re.compile(r"bot\d+:[\w-]+")
+
+
+def _redact(text: str) -> str:
+    return _TOKEN_RE.sub("bot<redacted>", str(text))
 
 
 def _send_telegram(chat_id: str, text: str) -> bool:
     token = os.getenv("TELEGRAM_TOKEN")
     if not token or not chat_id:
         return False
-    response = requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        json={"chat_id": chat_id, "text": text},
-        timeout=20,
-    )
-    response.raise_for_status()
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        # str(exc) contient l'URL, donc le token : on ne garde que le type.
+        raise DeliveryError(f"telegram_network:{type(exc).__name__}") from None
+    if not response.ok:
+        try:
+            description = str(response.json().get("description", ""))[:120]
+        except ValueError:
+            description = ""
+        raise DeliveryError(f"telegram_http_{response.status_code}:{_redact(description)}")
     return True
 
 
+def _parse_dt(value):
+    dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
 def expire_due_subscriptions(sb):
+    """Passe en past_due les abonnements payants échus, et en expired les essais finis.
+
+    La mise à jour est CONDITIONNELLE (status + date) : si le webhook de
+    paiement renouvelle l'abonnement entre la lecture et l'écriture, la ligne
+    ne correspond plus au filtre et n'est pas écrasée.
+    """
     now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
     rows = (
         sb.table("subscriptions")
         .select("user_id,plan,status,current_period_end")
-        .in_("status", ["active", "past_due"])
+        .eq("status", "active")
+        .neq("plan", "free")
+        .lte("current_period_end", now_iso)
         .execute()
         .data
         or []
     )
     for row in rows:
         end = row.get("current_period_end")
-        if not end:
-            continue
-        dt = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
-        if (
-            dt <= now
-            and row.get("plan") != "free"
-            and row.get("status") != "past_due"
-        ):
-            (
+        try:
+            if not end or _parse_dt(end) > now:
+                continue
+            updated = (
                 sb.table("subscriptions")
                 .update({
                     "status": "past_due",
                     "last_payment_status": "due",
-                    "updated_at": now.isoformat(),
+                    "updated_at": now_iso,
                 })
                 .eq("user_id", row["user_id"])
+                .eq("status", "active")
+                .lte("current_period_end", now_iso)
                 .execute()
+                .data
+                or []
             )
-            sb.table("subscription_notifications").insert({
-                "user_id": row["user_id"],
-                "kind": "subscription_expired",
-                "payload": {"plan": row.get("plan"), "period_end": end},
-            }).execute()
+            if updated:
+                sb.table("subscription_notifications").insert({
+                    "user_id": row["user_id"],
+                    "kind": "subscription_expired",
+                    "payload": {"plan": row.get("plan"), "period_end": end},
+                }).execute()
+        except Exception as exc:  # une ligne invalide ne bloque pas les autres
+            print(f"[maintenance] abonnement {row.get('user_id')} ignoré : {type(exc).__name__}")
+
+    # Essais terminés : l'accès est déjà coupé par trial_end, on aligne le statut
+    # affiché (badge, page compte).
+    (
+        sb.table("subscriptions")
+        .update({"status": "expired", "updated_at": now_iso})
+        .eq("status", "trialing")
+        .lte("trial_end", now_iso)
+        .execute()
+    )
 
 
 def _message(kind: str, payload: dict) -> tuple[str, str]:
@@ -161,14 +209,17 @@ def send_pending_notifications(sb):
             try:
                 sent = _send_email(email, subject, body) or sent
             except Exception as exc:
-                errors.append(f"email:{exc}")
+                # Message lisible par l'utilisateur (RLS) : pas de détail serveur.
+                errors.append(f"email:{type(exc).__name__}")
         if settings.get("telegram_enabled") and settings.get("telegram_chat_id"):
             try:
                 sent = _send_telegram(
                     str(settings["telegram_chat_id"]), body
                 ) or sent
+            except DeliveryError as exc:
+                errors.append(str(exc))
             except Exception as exc:
-                errors.append(f"telegram:{exc}")
+                errors.append(f"telegram:{type(exc).__name__}")
 
         (
             sb.table("subscription_notifications")

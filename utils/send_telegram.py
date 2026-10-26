@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import html  # noqa: E402
+import re  # noqa: E402
 import os  # noqa: E402
 import time  # noqa: E402
 
@@ -73,6 +75,35 @@ def sauvegarder_lien_envoye(lien):
         logger.error(f"❌ Erreur lors de la sauvegarde du lien: {e}")
 
 
+_TOKEN_RE = re.compile(r"bot\d+:[\w-]+")
+
+
+def _redact(texte) -> str:
+    """Masque le token : les exceptions requests incluent l'URL /bot<TOKEN>/."""
+    return _TOKEN_RE.sub("bot<redacted>", str(texte))
+
+
+def _h(valeur, defaut="N/A") -> str:
+    if valeur is None or (isinstance(valeur, float) and pd.isna(valeur)):
+        valeur = defaut
+    return html.escape(str(valeur))
+
+
+def construire_message(row, prix_reel: int, gain: int, kilometrage: int, lien: str) -> str:
+    return (
+        f"🔥 <b>BONNE AFFAIRE AUTO DÉTECTÉE</b> 🔥\n\n"
+        f"🚘 <b>Véhicule :</b> {_h(row.get('Titre'))}\n"
+        f"🏷️ <b>Marque :</b> {_h(row.get('Marque'))}\n"
+        f"💰 <b>Prix :</b> {prix_reel:,} DT <b>(Sous l'argus de ~{gain:,} DT !)</b>\n"
+        f"📅 <b>Année :</b> {_h(row.get('Année'))} | 🛣️ <b>KM :</b> {kilometrage:,}\n"
+        f"⚙️ <b>Énergie :</b> {_h(row.get('Energie'))} | "
+        f"🕹️ <b>Boîte :</b> {_h(row.get('Boite_Vitesse'))}\n"
+        f"🐎 <b>Puissance Fiscale :</b> {_h(row.get('Puissance_Fiscale'))} CV\n"
+        f"📍 <b>Région :</b> {_h(row.get('Localisation'))}\n\n"
+        f'🔗 <a href="{html.escape(lien, quote=True)}">Ouvrir l\'annonce</a>'
+    )
+
+
 def envoyer_message_telegram(texte):
     """Envoie un message sur Telegram"""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
@@ -82,7 +113,10 @@ def envoyer_message_telegram(texte):
         return False
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": texte, "parse_mode": "Markdown"}
+    # HTML (et non Markdown) : les champs scrapés sont échappés avec html.escape,
+    # alors qu'un simple "_" ou "*" dans un titre faisait rejeter le message
+    # en Markdown (400 "can't parse entities") à chaque run.
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": texte, "parse_mode": "HTML"}
 
     try:
         response = requests.post(url, json=payload, timeout=10)
@@ -91,10 +125,10 @@ def envoyer_message_telegram(texte):
             return True
         # Le corps de la réponse contient la raison exacte du refus
         # (parse_mode invalide, chat introuvable, message trop long...).
-        logger.error(f"❌ Erreur Telegram {response.status_code}: {response.text[:300]}")
+        logger.error(f"❌ Erreur Telegram {response.status_code}: {_redact(response.text[:300])}")
         return False
     except Exception as e:
-        logger.error(f"❌ Erreur réseau Telegram: {e}")
+        logger.error(f"❌ Erreur réseau Telegram: {_redact(e)}")
         return False
 
 
@@ -165,18 +199,7 @@ def envoyer_alertes_telegram():
         gain = prix_theorique - prix_reel
         kilometrage = _entier(row.get("Kilométrage"))
 
-        message = (
-            f"🔥 *BONNE AFFAIRE AUTO DÉTECTÉE* 🔥\n\n"
-            f"🚘 *Véhicule :* {row.get('Titre', 'N/A')}\n"
-            f"🏷️ *Marque :* {row.get('Marque', 'N/A')}\n"
-            f"💰 *Prix :* {prix_reel:,} DT *(Sous l'argus de ~{gain:,} DT !)*\n"
-            f"📅 *Année :* {row.get('Année', 'N/A')} | 🛣️ *KM :* {kilometrage:,}\n"
-            f"⚙️ *Énergie :* {row.get('Energie', 'N/A')} | "
-            f"🕹️ *Boîte :* {row.get('Boite_Vitesse', 'N/A')}\n"
-            f"🐎 *Puissance Fiscale :* {row.get('Puissance_Fiscale', 'N/A')} CV\n"
-            f"📍 *Région :* {row.get('Localisation', 'N/A')}\n\n"
-            f"🔗 [Ouvrir l'Annonce Directement]({lien_annonce})"
-        )
+        message = construire_message(row, prix_reel, gain, kilometrage, lien_annonce)
 
         if envoyer_message_telegram(message):
             sauvegarder_lien_envoye(lien_annonce)

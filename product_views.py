@@ -16,7 +16,7 @@ import plotly.express as px
 from core.market_valuation import market_valuation, compare_ml_to_market
 from core.product_insights import explain_price, valuation_confidence
 from core.access_control import PLAN_CATALOG, ROLE_LABELS, effective_plan, subscription_is_active
-from services.payment_provider import checkout_availability, start_checkout
+from services.payment_provider import CheckoutError, checkout_availability, start_checkout
 
 from services.supabase_service import (
     add_favorite, create_alert, delete_alert, get_notification_settings,
@@ -955,14 +955,18 @@ def page_compte(df=None):
         st.markdown("### Notifications")
         settings = get_notification_settings(client) or {}
         with st.form("notif_settings"):
-            email = st.text_input("Email de notification", value=settings.get("email") or profile.get("email", ""))
+            account_email = profile.get("email", "")
+            st.text_input(
+                "Email de notification", value=account_email, disabled=True,
+                help="Les alertes sont envoyées à l'adresse vérifiée de votre compte.",
+            )
             telegram_chat_id = st.text_input("Chat ID Telegram", value=settings.get("telegram_chat_id") or "", help="Identifiant du chat où le bot AutoDeal doit envoyer vos alertes.")
             c1, c2 = st.columns(2)
             email_enabled = c1.checkbox("Activer les emails", value=bool(settings.get("email_enabled", True)))
             telegram_enabled = c2.checkbox("Activer Telegram", value=bool(settings.get("telegram_enabled", False)))
             save = st.form_submit_button("Enregistrer mes préférences", type="primary")
         if save:
-            save_notification_settings(client, {"user_id": st.session_state["sb_user_id"], "email": email.strip() or None,
+            save_notification_settings(client, {"user_id": st.session_state["sb_user_id"], "email": account_email or None,
                 "telegram_chat_id": telegram_chat_id.strip() or None, "email_enabled": email_enabled, "telegram_enabled": telegram_enabled})
             st.success("Préférences enregistrées.")
             st.rerun()
@@ -1036,6 +1040,8 @@ def page_tarifs(df=None):
                     st.success("Votre formule actuelle")
                 elif key == "free":
                     st.caption("Disponible sans paiement.")
+                elif access.get("role") not in {"guest", None} and access.get("role") not in plan["roles"]:
+                    st.caption(f"Réservée aux comptes {role_targets[key]}.")
                 else:
                     if st.button("Choisir cette formule", key=f"choose_{key}_{'y' if annual else 'm'}", use_container_width=True):
                         if access.get("role") == "guest":
@@ -1051,10 +1057,13 @@ def page_tarifs(df=None):
                                     billing_cycle="yearly" if annual else "monthly",
                                     email=profile.get("email"),
                                     full_name=profile.get("full_name"),
+                                    role=access.get("role"),
                                 )
                                 st.link_button("Continuer vers le paiement", url)
-                            except Exception as exc:
+                            except CheckoutError as exc:
                                 st.info(str(exc))
+                            except Exception:
+                                st.error("Le paiement n'a pas pu être initialisé. Réessayez dans quelques minutes.")
 
     st.divider()
     st.markdown("### Paiement et sécurité")

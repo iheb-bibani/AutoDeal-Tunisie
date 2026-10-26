@@ -78,6 +78,18 @@ def checkout_availability() -> CheckoutAvailability:
     )
 
 
+class CheckoutError(RuntimeError):
+    """Erreur affichable telle quelle à l'utilisateur (pas de détail technique)."""
+
+
+def plan_allowed_for_role(plan: str, role: str) -> bool:
+    """Un plan payant n'a de sens que pour les rôles qu'il débloque
+    (cf. core.access_control.PLAN_CATALOG)."""
+    from core.access_control import PLAN_CATALOG
+
+    return role in PLAN_CATALOG.get(plan, {}).get("roles", set())
+
+
 def _price(plan: str, billing_cycle: str) -> int:
     cycle = "yearly" if billing_cycle == "yearly" else "monthly"
     if plan not in PLAN_PRICES_TND:
@@ -99,6 +111,7 @@ def start_checkout(
     email: str | None = None,
     full_name: str | None = None,
     accepted_methods: Iterable[str] = ("bank_card", "e-DINAR"),
+    role: str | None = None,
 ) -> str:
     """Crée un paiement hébergé Konnect et renvoie l'URL de checkout.
 
@@ -107,7 +120,12 @@ def start_checkout(
     """
     availability = checkout_availability()
     if not availability.enabled:
-        raise RuntimeError(availability.reason)
+        raise CheckoutError(availability.reason)
+    if role is not None and not plan_allowed_for_role(plan, role):
+        raise CheckoutError(
+            "Cette formule n'est pas disponible pour votre type de compte : "
+            "elle ne débloquerait aucune fonctionnalité."
+        )
 
     api_key = _secret("KONNECT_API_KEY")
     wallet_id = _secret("KONNECT_WALLET_ID")

@@ -32,3 +32,30 @@ def test_match_rejects_budget_or_gap():
 
 def test_match_accepts_optional_brand_model():
     assert _match(row(), alert(brand=None, model=None)) is True
+
+
+def test_email_unique_obligatoire():
+    from utils.send_personalized_alerts import valid_single_email
+
+    assert valid_single_email("a@x.com") == "a@x.com"
+    assert valid_single_email("Jean <a@x.com>") == "a@x.com"
+    assert valid_single_email("a@x.com, b@y.com") is None
+    assert valid_single_email("a@x.com\r\nBcc: b@y.com") is None
+    assert valid_single_email("pas-un-email") is None
+    assert valid_single_email(None) is None
+
+
+def test_token_masque_dans_les_logs():
+    from utils.send_personalized_alerts import _redact
+
+    msg = "HTTPSConnectionPool: url: /bot123456:AAH-abc_def/sendMessage"
+    assert "AAH" not in _redact(msg)
+
+
+def test_message_telegram_deal_echappe_le_html():
+    from utils.send_telegram import construire_message
+
+    r = pd.Series({"Titre": "Golf_7 <GTI> *top*", "Marque": "Volkswagen", "Localisation": "Tunis"})
+    msg = construire_message(r, 50000, 5000, 90000, "https://x.tn/a?b=1&c=2")
+    assert "&lt;GTI&gt;" in msg
+    assert 'href="https://x.tn/a?b=1&amp;c=2"' in msg

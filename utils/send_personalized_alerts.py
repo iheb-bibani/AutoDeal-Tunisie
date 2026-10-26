@@ -18,6 +18,8 @@ import os  # noqa: E402
 import smtplib  # noqa: E402
 import ssl  # noqa: E402
 from email.message import EmailMessage  # noqa: E402
+from email.utils import getaddresses  # noqa: E402
+import re  # noqa: E402
 from functools import partial  # noqa: E402
 
 import pandas as pd  # noqa: E402
@@ -78,6 +80,44 @@ def _message_text(row, alert_name):
     )
 
 
+_TOKEN_RE = re.compile(r"bot\d+:[\w-]+")
+_PAGE = 1000  # plafond PostgREST par défaut
+
+
+def _redact(text) -> str:
+    """Masque le token du bot : les exceptions requests contiennent l'URL complète."""
+    return _TOKEN_RE.sub("bot<redacted>", str(text))
+
+
+def valid_single_email(value) -> str | None:
+    """Renvoie l'adresse si `value` contient exactement UNE adresse e-mail valide.
+
+    Le champ est saisi librement par l'utilisateur : sans ce contrôle,
+    "a@x.com, b@y.com" ferait envoyer à plusieurs destinataires, et un retour
+    à la ligne lèverait une exception qui interrompait tout le run.
+    """
+    if not value or not isinstance(value, str) or any(c in value for c in "\r\n"):
+        return None
+    parsed = getaddresses([value])
+    if len(parsed) != 1:
+        return None
+    addr = parsed[0][1].strip()
+    if not re.fullmatch(r"[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+", addr):
+        return None
+    return addr
+
+
+def _fetch_all(build_query):
+    """Pagine une requête PostgREST (`build_query()` renvoie un builder neuf)."""
+    rows, start = [], 0
+    while True:
+        batch = build_query().range(start, start + _PAGE - 1).execute().data or []
+        rows.extend(batch)
+        if len(batch) < _PAGE:
+            return rows
+        start += _PAGE
+
+
 def send_telegram(chat_id, text):
     token = os.getenv("TELEGRAM_TOKEN")
     if not token or not chat_id:
@@ -90,9 +130,9 @@ def send_telegram(chat_id, text):
         )
         if r.ok:
             return True
-        logger.error("Telegram %s: %s", r.status_code, r.text[:300])
+        logger.error("Telegram %s: %s", r.status_code, _redact(r.text[:300]))
     except Exception as exc:
-        logger.error("Erreur Telegram: %s", exc)
+        logger.error("Erreur Telegram: %s", _redact(exc))
     return False
 
 
@@ -102,6 +142,7 @@ def send_email(to_email, row, alert_name):
     username = os.getenv("SMTP_USERNAME")
     password = os.getenv("SMTP_PASSWORD")
     sender = os.getenv("SMTP_FROM") or username
+    to_email = valid_single_email(to_email)
     if not all([host, username, password, sender, to_email]):
         return False
 
@@ -134,6 +175,46 @@ def send_email(to_email, row, alert_name):
         return False
 
 
+def _process_alert(db, alert, deals, settings_by_user, account_email) -> int:
+    user_id = str(alert["user_id"])
+    settings = settings_by_user.get(user_id, {})
+    matches = deals[deals.apply(_match, axis=1, args=(alert,))]
+    if matches.empty:
+        return 0
+    delivered = _fetch_all(
+        lambda: db.table("alert_deliveries").select("listing_url,channel").eq("alert_id", alert["id"]).order("id")
+    )
+    done = {(str(x["listing_url"]), str(x["channel"])) for x in delivered}
+    alert_name = alert.get("name") or "Mon alerte"
+    sent = 0
+
+    for _, row in matches.iterrows():
+        link = str(row.get("Lien", "")).strip()
+        if not link or link == "nan":
+            continue
+        channels = []
+        if alert.get("telegram_enabled") and settings.get("telegram_enabled") and settings.get("telegram_chat_id"):
+            channels.append(("telegram", partial(send_telegram, settings["telegram_chat_id"], _message_text(row, alert_name))))
+        if alert.get("email_enabled") and settings.get("email_enabled", True):
+            to = account_email(user_id)
+            if to:
+                channels.append(("email", partial(send_email, to, row, alert_name)))
+
+        for channel, sender in channels:
+            if (link, channel) in done:
+                continue
+            if sender():
+                # upsert idempotent : un doublon (run concurrent) ne fait pas planter le run.
+                db.table("alert_deliveries").upsert(
+                    {"alert_id": alert["id"], "user_id": alert["user_id"], "listing_url": link, "channel": channel},
+                    on_conflict="alert_id,listing_url,channel",
+                    ignore_duplicates=True,
+                ).execute()
+                done.add((link, channel))
+                sent += 1
+    return sent
+
+
 def main():
     if not os.path.exists(DEALS_FILE):
         logger.warning("Fichier d'opportunités absent: %s", DEALS_FILE)
@@ -152,39 +233,30 @@ def main():
         logger.info("Aucune opportunité solide à notifier.")
         return
 
-    alerts = db.table("alerts").select("*").eq("active", True).execute().data or []
-    settings_rows = db.table("notification_settings").select("*").execute().data or []
+    alerts = _fetch_all(lambda: db.table("alerts").select("*").eq("active", True).order("id"))
+    settings_rows = _fetch_all(lambda: db.table("notification_settings").select("*").order("user_id"))
     settings_by_user = {str(x["user_id"]): x for x in settings_rows}
+    verified_emails: dict[str, str | None] = {}
+
+    def account_email(user_id: str) -> str | None:
+        """Adresse VÉRIFIÉE du compte (auth.users), jamais le champ libre saisi
+        dans notification_settings : on n'envoie qu'au titulaire du compte."""
+        if user_id not in verified_emails:
+            try:
+                user = db.auth.admin.get_user_by_id(user_id).user
+                confirmed = getattr(user, "email_confirmed_at", None) or getattr(user, "confirmed_at", None)
+                verified_emails[user_id] = valid_single_email(getattr(user, "email", None)) if confirmed else None
+            except Exception as exc:
+                logger.warning("Email du compte %s introuvable : %s", user_id, type(exc).__name__)
+                verified_emails[user_id] = None
+        return verified_emails[user_id]
+
     total = 0
-
     for alert in alerts:
-        user_id = str(alert["user_id"])
-        settings = settings_by_user.get(user_id, {})
-        delivered = db.table("alert_deliveries").select("listing_url,channel").eq("alert_id", alert["id"]).execute().data or []
-        done = {(str(x["listing_url"]), str(x["channel"])) for x in delivered}
-        matches = deals[deals.apply(_match, axis=1, args=(alert,))]
-
-        for _, row in matches.iterrows():
-            link = str(row.get("Lien", "")).strip()
-            if not link or link == "nan":
-                continue
-            text = _message_text(row, alert.get("name") or "Mon alerte")
-            channels = []
-            if alert.get("telegram_enabled") and settings.get("telegram_enabled") and settings.get("telegram_chat_id"):
-                channels.append(("telegram", partial(send_telegram, settings["telegram_chat_id"], text)))
-            if alert.get("email_enabled") and settings.get("email_enabled", True) and settings.get("email"):
-                channels.append(("email", partial(send_email, settings["email"], row, alert.get("name") or "Mon alerte")))
-
-            for channel, sender in channels:
-                if (link, channel) in done:
-                    continue
-                if sender():
-                    db.table("alert_deliveries").insert({
-                        "alert_id": alert["id"], "user_id": alert["user_id"],
-                        "listing_url": link, "channel": channel,
-                    }).execute()
-                    done.add((link, channel))
-                    total += 1
+        try:
+            total += _process_alert(db, alert, deals, settings_by_user, account_email)
+        except Exception as exc:  # une alerte en échec ne bloque pas les autres utilisateurs
+            logger.error("Alerte %s ignorée : %s", alert.get("id"), _redact(exc))
 
     logger.info("%s notification(s) personnalisée(s) envoyée(s).", total)
 
