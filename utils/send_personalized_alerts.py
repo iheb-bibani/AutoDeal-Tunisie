@@ -35,6 +35,11 @@ logger = get_logger(__name__)
 DEALS_FILE = PROCESSED_FILES["deals"]
 
 
+
+def _fr(n) -> str:
+    """12345 -> "12 345" (séparateur de milliers français)."""
+    return f"{int(n):,}".replace(",", " ")
+
 def _num(v, default=None):
     try:
         x = float(v)
@@ -73,9 +78,12 @@ def _message_text(row, alert_name):
     return (
         f"AutoDeal — {alert_name}\n\n"
         f"{row.get('Marque', '')} {row.get('Modèle', '')} — {row.get('Année', 'N/A')}\n"
-        f"Prix : {prix:,} DT | estimation : {theorique:,} DT\n"
-        f"Écart estimé : {gain:,} DT | kilométrage : {int(_num(row.get('Kilométrage'), 0)):,} km\n"
-        f"Région : {row.get('Localisation', 'N/A')}\n\n"
+        f"Prix : {_fr(prix)} DT | estimation : {_fr(theorique)} DT\n"
+        f"Écart estimé : {_fr(gain)} DT | kilométrage : {_fr(int(_num(row.get('Kilométrage'), 0)))} km\n"
+        f"Région : {row.get('Localisation', 'N/A')}\n"
+        + (f"Prix baissé de {abs(_num(row.get('Variation_Prix_Pct'), 0)):.0f} % depuis la 1re publication\n"
+           if _num(row.get("Variation_Prix_Pct"), 0) <= -3 else "")
+        + "\n"
         f"Annonce : {row.get('Lien', '')}"
     )
 
@@ -157,9 +165,9 @@ def send_email(to_email, row, alert_name):
     msg.add_alternative(
         f"<h2>🚗 {html.escape(title)}</h2>"
         f"<p><strong>Alerte :</strong> {html.escape(str(alert_name))}</p>"
-        f"<p>Prix : <strong>{int(_num(row.get('Prix'), 0)):,} DT</strong><br>"
-        f"Estimation AutoDeal : {int(_num(row.get('Prix_Theorique'), 0)):,} DT<br>"
-        f"Kilométrage : {int(_num(row.get('Kilométrage'), 0)):,} km</p>"
+        f"<p>Prix : <strong>{_fr(int(_num(row.get('Prix'), 0)))} DT</strong><br>"
+        f"Estimation AutoDeal : {_fr(int(_num(row.get('Prix_Theorique'), 0)))} DT<br>"
+        f"Kilométrage : {_fr(int(_num(row.get('Kilométrage'), 0)))} km</p>"
         f"<p><a href=\"{link}\">Voir l'annonce</a></p>",
         subtype="html",
     )

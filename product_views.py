@@ -15,6 +15,7 @@ import plotly.express as px
 
 from core.market_valuation import market_valuation, compare_ml_to_market
 from core.product_insights import explain_price, valuation_confidence
+from config import SEUIL_DEAL_MAX, SEUIL_DEAL_MIN
 from core.access_control import PLAN_CATALOG, ROLE_LABELS, effective_plan, subscription_is_active
 from services.payment_provider import CheckoutError, checkout_availability, start_checkout
 
@@ -77,6 +78,11 @@ def _range_estimation(row):
     est = pd.to_numeric(pd.Series([row.get("Prix_Theorique")]), errors="coerce").iloc[0]
     if pd.isna(est) or est <= 0:
         return None, None, None
+    # Fourchette calibrée à 80 % produite par le pipeline (core/intervalles.py).
+    bas = pd.to_numeric(pd.Series([row.get("Prix_Bas_80")]), errors="coerce").iloc[0]
+    haut = pd.to_numeric(pd.Series([row.get("Prix_Haut_80")]), errors="coerce").iloc[0]
+    if pd.notna(bas) and pd.notna(haut) and bas < est < haut:
+        return float(est), float(bas), float(haut)
     err = pd.to_numeric(pd.Series([row.get("Erreur_Relative_Modele")]), errors="coerce").iloc[0]
     if pd.isna(err) or err <= 0:
         err = 0.12
@@ -159,6 +165,18 @@ def _listing_snapshot(row):
     return out
 
 
+def _est_vrai(serie) -> pd.Series:
+    """Booléen robuste après un aller-retour CSV ("True"/"False"/1/0)."""
+    return pd.Series(serie).astype(str).str.strip().str.lower().isin({"true", "1", "vrai"})
+
+
+def _texte_baisse(row) -> str:
+    var = pd.to_numeric(pd.Series([row.get("Variation_Prix_Pct")]), errors="coerce").iloc[0]
+    if pd.isna(var) or var > -3:
+        return ""
+    return f" · 📉 prix baissé de {abs(var):.0f} % (était {_fmt_int(row.get('Prix_Initial'), ' DT')})"
+
+
 def _set_detail(row):
     st.session_state["selected_listing"] = row.get("Lien")
     st.session_state["page"] = "🚘 Détail annonce"
@@ -192,7 +210,8 @@ def render_listing_card(row, key, compare_enabled=True):
         b.metric("Écart marché", opp_txt)
         c.metric("Comparables", _fmt_int(row.get("Nb_Comparables")))
         st.caption(f"{_badge(score)} · Estimation : {_fmt_int(est, ' DT')}" +
-                   (f" · fourchette {_fmt_int(low, ' DT')} – {_fmt_int(high, ' DT')}" if low else ""))
+                   (f" · fourchette {_fmt_int(low, ' DT')} – {_fmt_int(high, ' DT')}" if low else "") +
+                   _texte_baisse(row))
 
         x1, x2, x3, x4 = st.columns([1.0, 1.0, 1.0, 1.7])
         if x1.button("Analyser", key=f"detail_{key}", use_container_width=True):
@@ -332,6 +351,9 @@ def page_acheter(df):
         km_max = st.number_input("Kilométrage maximum", min_value=0, max_value=1000000, value=150000, step=10000)
     with f4:
         deals_only = st.checkbox("Bonnes affaires uniquement", value=bool(st.session_state.pop("buy_deals_only", False)))
+        baisse_only = st.checkbox("Prix en baisse uniquement", value=False,
+                                  help="Vendeurs ayant baissé leur prix depuis la première publication.") \
+            if "Baisse_Prix" in d else False
 
     s1, s2, s3 = st.columns(3)
     marques = s1.multiselect("Marque", sorted(d["Marque"].dropna().astype(str).unique()))
@@ -348,7 +370,10 @@ def page_acheter(df):
     if boites:
         d = d[d["Boite_Vitesse"].isin(boites)]
     if deals_only:
-        d = d[d["Score_Opportunite"].between(.15, .55)]
+        # Même définition qu'une affaire publiée (config.SEUIL_DEAL_MIN/MAX).
+        d = d[d["Score_Opportunite"].between(SEUIL_DEAL_MIN, SEUIL_DEAL_MAX)]
+    if baisse_only:
+        d = d[_est_vrai(d["Baisse_Prix"])]
 
     if len(d):
         d = d.copy()
@@ -361,12 +386,17 @@ def page_acheter(df):
         return
 
     top = d.head(30)
-    tabs = st.tabs(["⭐ Recommandés", "💸 Moins chers", "🆕 Plus récents"])
+    noms_onglets = ["⭐ Recommandés", "💸 Moins chers", "🆕 Plus récents"]
     orders = [
         top,
         d.sort_values("Prix").head(30),
         d.sort_values(["Année", "Annonce-Detectee"], ascending=False).head(30),
     ]
+    if "Variation_Prix_Pct" in d and _est_vrai(d.get("Baisse_Prix", pd.Series(dtype=bool))).any():
+        noms_onglets.append("📉 Prix en baisse")
+        baisses = d[_est_vrai(d["Baisse_Prix"])]
+        orders.append(baisses.sort_values("Variation_Prix_Pct").head(30))
+    tabs = st.tabs(noms_onglets)
     for tab, subset in zip(tabs, orders):
         with tab:
             for idx, row in subset.iterrows():
@@ -400,8 +430,12 @@ def page_detail(df, bundle=None):
     st.caption(" · ".join([_fmt_int(row.get("Année")), _fmt_int(row.get("Kilométrage"), " km"), _safe(row.get("Localisation")), _freshness_label(row)]))
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Prix demandé", _fmt_int(price, " DT"))
-    c2.metric("Estimation ML", _fmt_int(ml_value, " DT"))
+    var = pd.to_numeric(pd.Series([row.get("Variation_Prix_Pct")]), errors="coerce").iloc[0]
+    c1.metric("Prix demandé", _fmt_int(price, " DT"),
+              delta=(f"{var:+.0f} % depuis la 1re publication" if pd.notna(var) and abs(var) >= 1 else None),
+              delta_color="inverse")
+    c2.metric("Estimation ML", _fmt_int(ml_value, " DT"),
+              help=(f"Fourchette à 80 % : {_fmt_int(ml_low, ' DT')} – {_fmt_int(ml_high, ' DT')}" if ml_low else None))
     c3.metric("Médiane marché", _fmt_int(market.median_price, " DT"))
     c4.metric("Confiance", f"{confidence}/100 · {confidence_label}")
 

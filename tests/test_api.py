@@ -56,6 +56,12 @@ class FakeRepository:
     def deals(self):
         return self._deals.copy()
 
+    def model(self):
+        import joblib
+
+        from config import MODEL_PATH
+        return joblib.load(MODEL_PATH)
+
 
 def client():
     repo = FakeRepository()
@@ -116,3 +122,41 @@ def test_comparable_market_valuation():
     assert body["median_price_tnd"] is not None
     assert body["q25_tnd"] <= body["median_price_tnd"] <= body["q75_tnd"]
     assert all(row["Modèle"] == "208" for row in body["comparables"])
+
+
+def test_estimation_avec_fourchette_calibree():
+    payload = {"brand": "Peugeot", "model": "208", "year": 2021, "mileage_km": 65000,
+               "fuel": "Essence", "gearbox": "Manuelle", "fiscal_power_cv": 5}
+    with client() as c:
+        response = c.post("/api/v1/valuation/estimate", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert 15000 < body["estimate_tnd"] < 150000
+    if body["low_80_tnd"] is not None:
+        assert body["low_80_tnd"] < body["estimate_tnd"] < body["high_80_tnd"]
+    assert body["market_comparables"] >= 5
+
+
+def test_cle_api_protege_le_radar_de_deals(monkeypatch):
+    monkeypatch.setenv("AUTODEAL_API_KEY", "secret")
+    with client() as c:
+        assert c.get("/api/v1/deals").status_code == 401
+        assert c.get("/api/v1/deals", headers={"X-API-Key": "faux"}).status_code == 401
+        assert c.get("/api/v1/deals", headers={"X-API-Key": "secret"}).status_code == 200
+        # Tri par opportunité = radar : protégé ; tri par prix : public.
+        assert c.get("/api/v1/listings").status_code == 401
+        assert c.get("/api/v1/listings", params={"sort": "price_asc"}).status_code == 200
+
+
+def test_sans_cle_configuree_l_api_reste_ouverte(monkeypatch):
+    monkeypatch.delenv("AUTODEAL_API_KEY", raising=False)
+    with client() as c:
+        assert c.get("/api/v1/deals").status_code == 200
+
+
+def test_limitation_de_debit():
+    import backend.main as m
+
+    limiteur = m._LimiteurDebit(3)
+    assert [limiteur.autoriser("ip") for _ in range(4)] == [True, True, True, False]
+    assert limiteur.autoriser("autre-ip")

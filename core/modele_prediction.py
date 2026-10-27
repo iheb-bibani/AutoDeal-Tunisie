@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.doublons import cle_doublon  # noqa: E402
 from core.inference import regrouper_categories, shap_par_feature  # noqa: E402
+from core.intervalles import NIVEAU, calibrer, couverture, intervalle, valider_temporellement  # noqa: E402
 from core.io_atomique import dump_joblib_atomique, ecrire_csv_atomique, ecrire_json_atomique  # noqa: E402
 from config import (  # noqa: E402
     FEATURES_CATEGORIELLES,
@@ -561,6 +562,20 @@ def main():
           f"score robuste {scores_robustes[meilleur_nom]:.2%})")
     zone = diagnostic_biais_zone(df, meilleur_nom, cv, groups=groupes)
 
+    # Fourchettes calibrées (conformes) sur les résidus OOF du modèle retenu,
+    # avec contrôle de couverture sur les annonces les plus récentes.
+    pred_oof = resultats[meilleur_nom]["predictions_log"]
+    calibration = calibrer(y, pred_oof)
+    couverture_intervalles = {
+        "niveau_cible_pct": round(NIVEAU * 100),
+        "in_sample": couverture(df[CIBLE], pred_oof, calibration),
+        "holdout_temporel": valider_temporellement(df.get("Annonce-Detectee"), y, pred_oof, df[CIBLE]),
+    }
+    ht = couverture_intervalles["holdout_temporel"]
+    if ht:
+        print(f"Fourchettes {NIVEAU:.0%} : couverture holdout temporel {ht['couverture_pct']} % "
+              f"(largeur médiane {ht['largeur_relative_mediane_pct']} %)")
+
     date_entrainement = datetime.now().isoformat(timespec="seconds")
     diagnostics = {
         "date_entrainement": date_entrainement,
@@ -592,11 +607,15 @@ def main():
         "stabilite_finalistes": stabilite,
         "diagnostic_boite_vitesses": diagnostic_boite(df, shortlist, n_splits, groups=groupes),
         "diagnostic_zone_economique": zone,
+        "intervalles_prediction": {**couverture_intervalles, "calibration": calibration},
     }
     # OOF : scores de marché honnêtes.
     df["Prix_Theorique"] = np.clip(np.expm1(resultats[meilleur_nom]["predictions_log"]).round(), 1, None).astype(int)
     df["Score_Opportunite"] = (df["Prix_Theorique"] - df[CIBLE]) / df["Prix_Theorique"]
     df["Erreur_Absolue"] = (df[CIBLE] - df["Prix_Theorique"]).abs()
+    bas, haut = intervalle(np.expm1(pred_oof), calibration)
+    df["Prix_Bas_80"] = np.round(bas, -2)
+    df["Prix_Haut_80"] = np.round(haut, -2)
 
     # Profondeur de marché != liquidité réelle. On garde l'ancien alias pour
     # compatibilité UI, mais la nouvelle colonne porte le bon nom métier.
@@ -625,6 +644,7 @@ def main():
         "modele_nom": meilleur_nom,
         "mdape_oof": float(erreur_relative_typique),
         "date_entrainement": date_entrainement,
+        "intervalles": calibration,
     }
 
     # Écritures atomiques groupées en fin de calcul : un crash ou un timeout

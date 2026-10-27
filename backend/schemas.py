@@ -43,3 +43,28 @@ class ComparableMarketResponse(BaseModel):
     confidence: str
     selection_level: str
     comparables: list[dict]
+
+
+class EstimateRequest(BaseModel):
+    brand: str = Field(min_length=1, max_length=64, examples=["Peugeot"])
+    model: str = Field(min_length=1, max_length=64, examples=["208"])
+    year: int = Field(ge=1980, le=2100, examples=[2019])
+    mileage_km: float = Field(ge=0, le=1_500_000, examples=[85000])
+    fuel: str | None = Field(default=None, max_length=32, examples=["Essence"])
+    gearbox: str | None = Field(default=None, max_length=32, examples=["Manuelle"])
+    fiscal_power_cv: float | None = Field(default=None, ge=1, le=30, examples=[5])
+    engine_liters: float | None = Field(default=None, ge=0.6, le=8.0, examples=[1.2])
+
+
+class EstimateResponse(BaseModel):
+    estimate_tnd: float
+    low_80_tnd: float | None
+    high_80_tnd: float | None
+    interval_level: float | None
+    model_name: str
+    model_trained_at: str | None
+    model_mdape: float | None
+    market_comparables: int
+    market_median_tnd: float | None
+    market_q25_tnd: float | None
+    market_q75_tnd: float | None

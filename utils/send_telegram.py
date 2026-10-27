@@ -35,11 +35,16 @@ FICHIER_ALERTES = PROCESSED_FILES["deals"]
 FICHIER_DEJA_ENVOYEES = PROCESSED_FILES["sent_alerts"]
 
 
+
+def _fr(n) -> str:
+    """12345 -> "12 345" (séparateur de milliers français)."""
+    return f"{int(n):,}".replace(",", " ")
+
 def _entier(valeur, defaut=0):
     """Convertit une valeur de cellule en entier pour l'affichage.
 
     Tolère les vides, les NaN et les valeurs textuelles : un formatage
-    `f"{valeur:,}"` appliqué directement à une chaîne lève une ValueError et
+    `f"{_fr(valeur)}"` appliqué directement à une chaîne lève une ValueError et
     interrompt tout l'envoi.
     """
     try:
@@ -89,17 +94,25 @@ def _h(valeur, defaut="N/A") -> str:
     return html.escape(str(valeur))
 
 
+def _ligne_baisse(row) -> str:
+    var = pd.to_numeric(pd.Series([row.get("Variation_Prix_Pct")]), errors="coerce").iloc[0]
+    if pd.isna(var) or var > -3:
+        return ""
+    return f"📉 <b>Prix baissé de {abs(var):.0f} %</b> depuis la 1re publication\n"
+
+
 def construire_message(row, prix_reel: int, gain: int, kilometrage: int, lien: str) -> str:
     return (
         f"🔥 <b>BONNE AFFAIRE AUTO DÉTECTÉE</b> 🔥\n\n"
         f"🚘 <b>Véhicule :</b> {_h(row.get('Titre'))}\n"
         f"🏷️ <b>Marque :</b> {_h(row.get('Marque'))}\n"
-        f"💰 <b>Prix :</b> {prix_reel:,} DT <b>(Sous l'argus de ~{gain:,} DT !)</b>\n"
-        f"📅 <b>Année :</b> {_h(row.get('Année'))} | 🛣️ <b>KM :</b> {kilometrage:,}\n"
+        f"💰 <b>Prix :</b> {_fr(prix_reel)} DT <b>(Sous l'argus de ~{_fr(gain)} DT !)</b>\n"
+        f"📅 <b>Année :</b> {_h(row.get('Année'))} | 🛣️ <b>KM :</b> {_fr(kilometrage)}\n"
         f"⚙️ <b>Énergie :</b> {_h(row.get('Energie'))} | "
         f"🕹️ <b>Boîte :</b> {_h(row.get('Boite_Vitesse'))}\n"
         f"🐎 <b>Puissance Fiscale :</b> {_h(row.get('Puissance_Fiscale'))} CV\n"
-        f"📍 <b>Région :</b> {_h(row.get('Localisation'))}\n\n"
+        f"📍 <b>Région :</b> {_h(row.get('Localisation'))}\n"
+        f"{_ligne_baisse(row)}\n"
         f'🔗 <a href="{html.escape(lien, quote=True)}">Ouvrir l\'annonce</a>'
     )
 

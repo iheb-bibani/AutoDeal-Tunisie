@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import pandas as pd
 
 from core.io_atomique import ecrire_csv_atomique
+from core.prix_actuel import appliquer_prix_actuel
 from core.regles_texte import masque_bruit, masques_accident
 from config import (
     PROCESSED_FILES, MAX_DAYS_OLD,
@@ -354,6 +355,10 @@ def process_data():
     if millimes.sum():
         print(f"🔧 {int(millimes.sum())} prix en millimes ramenés en dinars.")
     df.loc[millimes, "Prix"] = df.loc[millimes, "Prix"] / 1000
+
+    # -- Prix ACTUEL (baisses de prix des vendeurs) : les CSV bruts gardent le
+    # premier prix vu. Voir core/prix_actuel.py.
+    df = appliquer_prix_actuel(df)
 
     # -- Prix hors plage plausible pour ce marché
     df = df[(df["Prix"] >= 3000) & (df["Prix"] <= 500000)]

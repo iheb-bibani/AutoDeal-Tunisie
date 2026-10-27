@@ -40,6 +40,7 @@ from config import MAX_DAYS_OLD
 from core.market_valuation import market_valuation, compare_ml_to_market, evaluate_market_ml_coverage
 from core.product_insights import valuation_confidence
 from core.inference import preparer_lignes, shap_par_feature
+from core.intervalles import intervalle
 from core.access_control import access_badge, can_open_page, visible_pro_pages
 from services.supabase_service import current_access_context, is_configured as supabase_is_configured
 
@@ -1824,18 +1825,25 @@ def page_calculateur(df, bundle):
         }
         market, comparables = market_valuation(df, target_market, min_n=5)
 
-        gr_fia = table_fiabilite_prix(df)
-        err_pct = erreur_pour_prix(gr_fia, prix_theorique)
+        # Fourchette calibrée à 80 % (core/intervalles.py) si le modèle la
+        # porte ; sinon ± erreur médiane de la tranche (ancien comportement).
         ml_bas = ml_haut = None
-        if err_pct is not None:
-            ml_bas = prix_theorique * (1 - err_pct / 100)
-            ml_haut = prix_theorique * (1 + err_pct / 100)
+        libelle_intervalle = ""
+        if bundle.get("intervalles"):
+            ml_bas, ml_haut = intervalle(prix_theorique, bundle["intervalles"])
+            libelle_intervalle = "fourchette à 80 %, calibrée sur les erreurs réelles du modèle"
+        else:
+            err_pct = erreur_pour_prix(table_fiabilite_prix(df), prix_theorique)
+            if err_pct is not None:
+                ml_bas = prix_theorique * (1 - err_pct / 100)
+                ml_haut = prix_theorique * (1 + err_pct / 100)
+                libelle_intervalle = f"±{err_pct:.0f} %, erreur médiane de la tranche"
 
         st.markdown("### Deux avis indépendants sur la valeur")
         r1, r2, r3 = st.columns(3)
         r1.metric("🤖 Estimation ML", fmt_dt(prix_theorique))
         if ml_bas is not None:
-            r1.caption(f"Intervalle modèle : {fmt_dt(ml_bas)} – {fmt_dt(ml_haut)} (±{err_pct:.0f} %)")
+            r1.caption(f"Intervalle modèle : {fmt_dt(ml_bas)} – {fmt_dt(ml_haut)} ({libelle_intervalle})")
         else:
             r1.caption("Intervalle modèle indisponible")
 
@@ -2818,12 +2826,15 @@ def page_assistant(df, bundle):
         }
         try:
             prix = float(np.expm1(bundle["pipeline"].predict(_ligne_modele(bundle, saisie))[0]))
-            gr = table_fiabilite_prix(df)
-            err = erreur_pour_prix(gr, prix) or 12
             st.success(f"**{marque} {modele or ''} {annee}**, {km or 100000:,} km".replace(",", " "))
             st.metric("Prix estimé par le modèle", f"{prix:,.0f} DT".replace(",", " "))
-            st.caption(f"Fourchette ± {err:.0f} % : {prix*(1-err/100):,.0f} – {prix*(1+err/100):,.0f} DT."
-                       .replace(",", " "))
+            if bundle.get("intervalles"):
+                bas, haut = intervalle(prix, bundle["intervalles"])
+                st.caption(f"Fourchette à 80 % : {bas:,.0f} – {haut:,.0f} DT.".replace(",", " "))
+            else:
+                err = erreur_pour_prix(table_fiabilite_prix(df), prix) or 12
+                st.caption(f"Fourchette ± {err:.0f} % : {prix*(1-err/100):,.0f} – {prix*(1+err/100):,.0f} DT."
+                           .replace(",", " "))
             st.caption("Pour la décomposition « pourquoi ce prix » (SHAP) et les annonces "
                        "comparables réelles, ouvre le Calculateur :")
             if st.button("💰 Ouvrir dans le Calculateur", key="assist_to_calc"):

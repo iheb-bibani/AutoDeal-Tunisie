@@ -111,3 +111,39 @@ def shap_par_feature(pipeline, X: pd.DataFrame, noms: list[str]) -> np.ndarray:
             raise ValueError(f"Colonne transformée non reconnue : {nom}")
         agg[:, noms.index(f)] += sv[:, j]
     return agg
+
+
+def features_depuis_saisie(
+    marque: str,
+    modele: str | None,
+    annee: int | None,
+    kilometrage: float | None,
+    energie: str | None = None,
+    boite: str | None = None,
+    puissance_fiscale: float | None = None,
+    cylindree: float | None = None,
+    annee_courante: int | None = None,
+) -> dict:
+    """Features du modèle à partir d'une saisie utilisateur, avec EXACTEMENT
+    les formules de core/enrichir_base_avance.py (âge, log-km, km/an…)."""
+    from datetime import datetime
+
+    from config import MARQUES_LUXE
+
+    annee_courante = annee_courante or datetime.now().year
+    age = max(annee_courante - int(annee), 0) if annee else np.nan
+    km = max(float(kilometrage), 0.0) if kilometrage is not None else np.nan
+    return {
+        "Kilométrage": km,
+        "Log_Kilometrage": float(np.log1p(km)) if np.isfinite(km) else np.nan,
+        "Age_Vehicule": age,
+        "Age_Carre": float(age) ** 2 if np.isfinite(age) else np.nan,
+        "Km_Par_An": float(min(km / max(age, 1), 100000)) if np.isfinite(km) and np.isfinite(age) else np.nan,
+        "Puissance_Fiscale": puissance_fiscale,
+        "Cylindree": cylindree if cylindree else np.nan,
+        "Segment_Vehicule": int(marque in MARQUES_LUXE),
+        "Marque": marque,
+        "Modèle": modele,
+        "Energie": energie,
+        "Boite_Vitesse": boite,
+    }

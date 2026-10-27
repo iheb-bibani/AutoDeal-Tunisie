@@ -12,25 +12,71 @@ introduced with proper authorization.
 """
 from __future__ import annotations
 
+import hmac
 import os
+import threading
+import time
+from collections import defaultdict, deque
 from functools import lru_cache
 from typing import Annotated
 
 import numpy as np
 import pandas as pd
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from backend.repository import MarketRepository
 from backend.schemas import (
     ComparableMarketResponse,
     ComparableRequest,
+    EstimateRequest,
+    EstimateResponse,
     HealthResponse,
     MarketSummaryResponse,
 )
+from core.inference import features_depuis_saisie, preparer_lignes
+from core.intervalles import intervalle
 from core.market_valuation import market_valuation
 
-API_VERSION = "2.0.0"
+API_VERSION = "2.1.0"
+RATE_LIMIT_PER_MIN = int(os.getenv("AUTODEAL_RATE_LIMIT_PER_MIN", "120"))
+
+
+def exiger_cle_api(x_api_key: Annotated[str | None, Header()] = None) -> None:
+    """Protège les données à valeur commerciale (radar de deals, tri par
+    opportunité) quand ``AUTODEAL_API_KEY`` est défini. Sans variable, l'API
+    reste ouverte (développement local, compatibilité)."""
+    attendue = os.getenv("AUTODEAL_API_KEY")
+    if not attendue:
+        return
+    if not x_api_key or not hmac.compare_digest(x_api_key.encode(), attendue.encode()):
+        raise HTTPException(status_code=401, detail="Clé API manquante ou invalide (en-tête X-API-Key).")
+
+
+class _LimiteurDebit:
+    """Fenêtre glissante d'une minute par adresse IP (en mémoire, par process)."""
+
+    def __init__(self, par_minute: int):
+        self.par_minute = par_minute
+        self._hits: dict[str, deque] = defaultdict(deque)
+        self._lock = threading.Lock()
+
+    def autoriser(self, cle: str) -> bool:
+        if self.par_minute <= 0:
+            return True
+        maintenant = time.monotonic()
+        with self._lock:
+            hits = self._hits[cle]
+            while hits and maintenant - hits[0] > 60:
+                hits.popleft()
+            if len(hits) >= self.par_minute:
+                return False
+            hits.append(maintenant)
+            return True
+
+
+limiteur = _LimiteurDebit(RATE_LIMIT_PER_MIN)
 
 
 def _cors_origins() -> list[str]:
@@ -86,6 +132,16 @@ app = FastAPI(
     redoc_url="/redoc",
     openapi_url="/openapi.json",
 )
+@app.middleware("http")
+async def limiter_debit(request: Request, call_next):
+    if request.url.path.startswith("/api/"):
+        client = request.client.host if request.client else "inconnu"
+        if not limiteur.autoriser(client):
+            return JSONResponse(status_code=429, content={"detail": "Trop de requêtes, réessayez dans une minute."},
+                                headers={"Retry-After": "60"})
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
@@ -154,7 +210,11 @@ def listings(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     repo: MarketRepository = Depends(get_repository),
+    x_api_key: Annotated[str | None, Header()] = None,
 ) -> dict:
+    # Le classement par opportunité EST le radar de deals : même protection.
+    if sort == "opportunity" or min_opportunity_pct is not None:
+        exiger_cle_api(x_api_key)
     df = repo.scored()
     if df.empty:
         return {"total": 0, "offset": offset, "limit": limit, "items": []}
@@ -222,7 +282,7 @@ def listings(
     }
 
 
-@app.get("/api/v1/deals", tags=["deals"])
+@app.get("/api/v1/deals", tags=["deals"], dependencies=[Depends(exiger_cle_api)])
 def deals(
     min_comparables: Annotated[int, Query(ge=0, le=1000)] = 5,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
@@ -317,4 +377,45 @@ def comparable_valuation(
         confidence=market.confidence,
         selection_level=market.selection_level,
         comparables=_records(comps, columns),
+    )
+
+
+@app.post("/api/v1/valuation/estimate", response_model=EstimateResponse, tags=["valuation"])
+def estimate(
+    payload: EstimateRequest,
+    repo: MarketRepository = Depends(get_repository),
+) -> EstimateResponse:
+    """Estimation ML d'un véhicule + fourchette calibrée à 80 % + contrôle par
+    les comparables réels (indépendant du modèle)."""
+    bundle = repo.model()
+    if bundle is None:
+        raise HTTPException(status_code=503, detail="Price model is unavailable")
+    saisie = features_depuis_saisie(
+        payload.brand, payload.model, payload.year, payload.mileage_km,
+        payload.fuel, payload.gearbox, payload.fiscal_power_cv, payload.engine_liters,
+    )
+    prix = float(np.expm1(bundle["pipeline"].predict(preparer_lignes(bundle, saisie))[0]))
+    calib = bundle.get("intervalles")
+    bas, haut = intervalle(prix, calib) if calib else (None, None)
+
+    df = repo.scored()
+    market = None
+    if not df.empty:
+        market, _ = market_valuation(df, {
+            "Marque": payload.brand, "Modèle": payload.model, "Année": payload.year,
+            "Age_Vehicule": saisie["Age_Vehicule"], "Kilométrage": payload.mileage_km,
+            "Energie": payload.fuel, "Boite_Vitesse": payload.gearbox,
+        }, min_n=5)
+    return EstimateResponse(
+        estimate_tnd=round(prix, -2),
+        low_80_tnd=None if bas is None else round(bas, -2),
+        high_80_tnd=None if haut is None else round(haut, -2),
+        interval_level=None if not calib else calib.get("niveau"),
+        model_name=str(bundle.get("modele_nom", "inconnu")),
+        model_trained_at=bundle.get("date_entrainement"),
+        model_mdape=bundle.get("mdape_oof"),
+        market_comparables=0 if market is None else int(market.n_comparables),
+        market_median_tnd=None if market is None else _json_value(market.median_price),
+        market_q25_tnd=None if market is None else _json_value(market.q25),
+        market_q75_tnd=None if market is None else _json_value(market.q75),
     )
