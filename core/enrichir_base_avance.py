@@ -26,10 +26,10 @@ d'un scraping à l'autre.
 import re
 import sys
 import unicodedata
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from core.dates import annee_courante as annee_courante_tunis  # noqa: E402
 
 import numpy as np
 import pandas as pd
@@ -70,7 +70,7 @@ def deriver_drapeaux_etat(texte: pd.Series) -> pd.DataFrame:
 def enrichir():
     df = pd.read_csv(PROCESSED_FILES["recent"], sep=";", encoding="utf-8-sig")
 
-    annee_courante = datetime.now().year
+    annee_courante = annee_courante_tunis()
 
     # Segment : 1 = Luxe, 0 = Standard (encodage fixe)
     df["Segment_Vehicule"] = df["Marque"].isin(MARQUES_LUXE).astype(int)

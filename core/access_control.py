@@ -90,6 +90,11 @@ def subscription_is_active(access: dict[str, Any]) -> bool:
     if access.get("role") == "admin":
         return True
     status = str(access.get("subscription_status") or "free").lower()
+    if status == "cancelled":
+        # Résiliation = pas de renouvellement, mais la période déjà payée reste
+        # acquise jusqu'à current_period_end (avant : accès coupé immédiatement).
+        period_end = _parse_dt(access.get("current_period_end"))
+        return bool(period_end and period_end > datetime.now(timezone.utc))
     if status == "active":
         # Une formule payante n'est active que pendant la période effectivement réglée.
         plan = str(access.get("plan") or "free")

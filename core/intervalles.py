@@ -18,8 +18,8 @@ import numpy as np
 import pandas as pd
 
 NIVEAU = 0.80
-BORNES_TRANCHES = [0, 15000, 25000, 35000, 50000, 75000, 100000, float("inf")]
-LIBELLES_TRANCHES = ["< 15k", "15-25k", "25-35k", "35-50k", "50-75k", "75-100k", "100k +"]
+from config import BORNES_TRANCHES_PRIX as BORNES_TRANCHES  # noqa: E402
+from config import LIBELLES_TRANCHES_PRIX as LIBELLES_TRANCHES  # noqa: E402
 MIN_PAR_TRANCHE = 80
 
 

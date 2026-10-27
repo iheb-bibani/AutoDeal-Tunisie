@@ -66,9 +66,13 @@ MAX_DAYS_OLD = 60  # Fenêtre de fraîcheur. Testée empiriquement de 30 à 365 
 SEUIL_MARQUE_RARE = 10   # Regrouper marques avec < N annonces
 SEUIL_MODELE_RARE = 5    # Regrouper modèles avec < N annonces
 
+# Tranches de prix partagées (fiabilité, suivi des performances, intervalles).
+BORNES_TRANCHES_PRIX = [0, 15000, 25000, 35000, 50000, 75000, 100000, float("inf")]
+LIBELLES_TRANCHES_PRIX = ["< 15k", "15–25k", "25–35k", "35–50k", "50–75k", "75–100k", "100k +"]
+
 # Seuils de deals (importés par detect_deals.py -- source unique).
 # SEUIL_DEAL_MIN = 0.25 (et non 0.15) : l'erreur relative médiane du modèle
-# est ~12%, donc un seuil à 15% est À L'INTÉRIEUR du bruit d'estimation. Porté
+# est ~10%, donc un seuil à 15% est À L'INTÉRIEUR du bruit d'estimation. Porté
 # à ~2x l'erreur typique pour que l'écart devienne un vrai signal.
 SEUIL_DEAL_MIN = 0.25    # Au moins 25% sous le prix théorique
 SEUIL_DEAL_MAX = 0.55    # Au-delà de 55%, c'est presque toujours une erreur de prix

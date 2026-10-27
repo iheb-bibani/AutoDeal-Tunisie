@@ -27,10 +27,10 @@ import re
 import sys
 import time
 import random
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from core.dates import aujourd_hui  # noqa: E402
 
 import pandas as pd
 from playwright.sync_api import sync_playwright
@@ -150,7 +150,7 @@ def parser_carte(c):
         "Localisation": loc, "Puissance_Fiscale": cv, "Etat_Vehicule": None,
         "Description": None,  # visible seulement sur la fiche détail (best-effort désactivé)
         "Annonce-Deposee": None,
-        "Annonce-Detectee": datetime.now().strftime("%Y-%m-%d"),
+        "Annonce-Detectee": aujourd_hui(),
         "Statut": "Active",
         # Lien stable et unique à partir de l'id de post agrégé (pas d'URL /annonce fiable)
         "Lien": f"{BASE}/#{c['idPost']}",

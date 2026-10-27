@@ -5,13 +5,13 @@ import random
 import pandas as pd
 import requests
 
-from datetime import datetime
 from bs4 import BeautifulSoup
 import sys
 from pathlib import Path
 
 # Racine du projet importable (lancé en `python scrapers/xxx.py`).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core.dates import aujourd_hui  # noqa: E402
 from core.io_atomique import ecrire_csv_atomique  # noqa: E402
 from scrapers.liens_vus import enregistrer_liens_vus  # noqa: E402
 from scrapers.parsing import parser_prix_tnd  # noqa: E402
@@ -136,7 +136,7 @@ def scraper_details_annonce(url_annonce, session):
                 "Lien": url_annonce,
                 "Source": "AutoMax",
                 "Annonce-Detectee":
-                    datetime.now().strftime("%Y-%m-%d"),
+                    aujourd_hui(),
                 "Annonce-Deposee": None,
 
                 "Marque": None,

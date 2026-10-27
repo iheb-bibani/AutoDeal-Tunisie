@@ -4,7 +4,7 @@ import os
 import re
 import csv
 import shutil
-from datetime import datetime, timedelta
+from datetime import timedelta
 import sys
 from pathlib import Path
 
@@ -12,6 +12,7 @@ import pandas as pd
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core.dates import aujourd_hui, maintenant  # noqa: E402
 from scrapers.liens_vus import enregistrer_liens_vus  # noqa: E402
 
 # ⚙️ CONFIGURATION DE L'AUTOMATISATION
@@ -28,7 +29,7 @@ def parser_anciennete(texte, reference=None):
     if not isinstance(texte, str):
         return None
 
-    reference = reference or datetime.now()
+    reference = reference or maintenant()
     texte = texte.strip().lower()
 
     match = re.match(r"(a|an|\d+)\s+(minute|hour|day|week|month|year)s?\s+ago", texte)
@@ -281,7 +282,7 @@ def scrape_tayara():
                             "Localisation": location,
                             "Anciennete": time_ago,
                             "Annonce-Deposee": parser_anciennete(time_ago),
-                            "Annonce-Detectee": datetime.now().strftime("%Y-%m-%d"),
+                            "Annonce-Detectee": aujourd_hui(),
                             "Lien": full_url
                         }
 

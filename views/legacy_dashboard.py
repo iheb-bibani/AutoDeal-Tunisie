@@ -201,8 +201,8 @@ def style_figure(fig, hauteur=380):
 # Fiabilité par tranche de prix + interprétation SHAP (partagés entre pages)
 # ---------------------------------------------------------------------------
 
-BORNES_PRIX = [0, 15000, 25000, 35000, 50000, 75000, 100000, float("inf")]
-LIBELLES_PRIX = ["< 15k", "15–25k", "25–35k", "35–50k", "50–75k", "75–100k", "100k +"]
+from config import BORNES_TRANCHES_PRIX as BORNES_PRIX  # noqa: E402
+from config import LIBELLES_TRANCHES_PRIX as LIBELLES_PRIX  # noqa: E402
 
 # Libellés lisibles des features techniques (sections Interprétation / SHAP)
 LABELS_FEATURES = {

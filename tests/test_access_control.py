@@ -44,11 +44,19 @@ def test_inactive_paid_plan_falls_back_to_free():
     a = {
         "role": "samsar",
         "plan": "pro",
-        "subscription_status": "cancelled",
+        "subscription_status": "inactive",
         "current_period_end": _future(),
     }
     assert effective_plan(a) == "free"
     assert not can_open_page("🤝 Samsar", a)
+
+
+def test_resiliation_garde_l_acces_jusqu_a_la_fin_de_periode_payee():
+    a = {"role": "samsar", "plan": "pro", "subscription_status": "cancelled", "current_period_end": _future()}
+    assert effective_plan(a) == "pro"
+    assert can_open_page("🤝 Samsar", a)
+    a["current_period_end"] = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    assert effective_plan(a) == "free"
 
 
 def test_expired_paid_period_blocks_access_even_if_status_active():

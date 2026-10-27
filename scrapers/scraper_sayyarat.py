@@ -26,10 +26,10 @@ import sys
 import time
 import random
 import unicodedata
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from core.dates import aujourd_hui  # noqa: E402
 
 import pandas as pd
 from playwright.sync_api import sync_playwright
@@ -148,7 +148,7 @@ def mapper(data, lien):
         "Etat_Vehicule": _get(specs, "etat", "état"),
         "Description": data.get("description"),
         "Annonce-Deposee": None,  # non exposé de façon fiable sur la fiche
-        "Annonce-Detectee": datetime.now().strftime("%Y-%m-%d"),
+        "Annonce-Detectee": aujourd_hui(),
         "Statut": "Active",
         "Lien": lien,
     }

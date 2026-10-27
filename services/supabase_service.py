@@ -373,7 +373,10 @@ def current_user_profile(state: dict[str, Any]) -> dict[str, Any]:
         or "",
         "role": profile.get("role") or "user",
         "plan": subscription.get("plan") or "free",
-        "subscription_status": subscription.get("status") or "active",
+        # Sans ligne d'abonnement : "active" n'a de sens que pour la formule
+        # gratuite ; une formule payante sans statut n'est jamais considérée active.
+        "subscription_status": subscription.get("status")
+        or ("active" if (subscription.get("plan") or "free") == "free" else "inactive"),
         "trial_end": subscription.get("trial_end"),
         "current_period_end": subscription.get("current_period_end"),
         "billing_cycle": subscription.get("billing_cycle"),

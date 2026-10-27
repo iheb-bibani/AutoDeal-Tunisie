@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from core.dates import aujourd_hui_ts  # noqa: E402
 
 import numpy as np
 import pandas as pd
@@ -102,7 +103,7 @@ def analyse_longitudinale(suivi: pd.DataFrame) -> None:
     # ignorée, elle est censurée à (aujourd'hui - première vue). Ne garder que
     # les disparues (comme l'ancienne version) créait un biais de survie.
     pv = pd.to_datetime(suivi.get("Premiere_Vue"), errors="coerce")
-    duree_censuree = (pd.Timestamp.now().normalize() - pv).dt.days
+    duree_censuree = (aujourd_hui_ts() - pv).dt.days
     duree = jours.where(disparue, duree_censuree)
     event = disparue.astype(int)
 

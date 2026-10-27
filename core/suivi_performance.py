@@ -26,8 +26,8 @@ except Exception:  # pragma: no cover
     PROCESSED_FILES = {"scored": str(PROCESSED_DATA_DIR / "tunisia-cars-scored.csv")}
 
 HISTORIQUE_PATH = Path(PROCESSED_DATA_DIR) / "historique_performance.json"
-BORNES_PRIX = [0, 15000, 25000, 35000, 50000, 75000, 100000, float("inf")]
-LIBELLES_PRIX = ["< 15k", "15-25k", "25-35k", "35-50k", "50-75k", "75-100k", "100k +"]
+from config import BORNES_TRANCHES_PRIX as BORNES_PRIX  # noqa: E402
+from config import LIBELLES_TRANCHES_PRIX as LIBELLES_PRIX  # noqa: E402
 K_REFERENCE = 7
 SEUIL_DRIFT_PRIX = 0.15
 SEUIL_DRIFT_VOLUME = 0.35

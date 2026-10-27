@@ -14,10 +14,10 @@ source.
 
 import os
 import sys
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from core.dates import aujourd_hui as date_du_jour  # noqa: E402
 
 import pandas as pd
 
@@ -295,7 +295,7 @@ def mettre_a_jour_depuis_observations(suivi, merged, connus, aujourd_hui, liens_
 
 
 def mettre_a_jour():
-    aujourd_hui = datetime.now().strftime("%Y-%m-%d")
+    aujourd_hui = date_du_jour()
 
     merged = pd.read_csv(PROCESSED_FILES["merged"], sep=";", encoding="utf-8-sig")
     merged = merged.dropna(subset=["Lien"]).drop_duplicates(subset=["Lien"], keep="last")

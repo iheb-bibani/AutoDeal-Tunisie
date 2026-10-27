@@ -16,12 +16,11 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
+
+from core.dates import aujourd_hui
 
 DOSSIER_VUS = Path(__file__).resolve().parents[1] / "data" / "raw" / "vus"
-FUSEAU = ZoneInfo("Africa/Tunis")
 
 # Préfixe du champ "Source" des annonces fusionnées, par clé de scraper.
 SOURCE_LABELS = {
@@ -31,10 +30,6 @@ SOURCE_LABELS = {
     "sayyarat": "sayyaratn.com",
     "autocentral": "autocentral.tn",
 }
-
-
-def aujourd_hui() -> str:
-    return datetime.now(FUSEAU).strftime("%Y-%m-%d")
 
 
 def enregistrer_liens_vus(

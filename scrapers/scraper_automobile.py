@@ -2,7 +2,6 @@ import time
 import random
 import os
 import re
-from datetime import datetime
 from patchright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -11,6 +10,7 @@ from pathlib import Path
 
 # Racine du projet importable (lancé en `python scrapers/xxx.py`).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core.dates import aujourd_hui  # noqa: E402
 from core.io_atomique import ecrire_csv_atomique  # noqa: E402
 from scrapers.liens_vus import enregistrer_liens_vus  # noqa: E402
 from scrapers.parsing import parser_prix_tnd  # noqa: E402
@@ -243,7 +243,7 @@ def extraire_specs_dynamiques(html_page, url_annonce):
         # Nouveau : date de dépôt de l'annonce (ex: "12.07.2026" -> "2026-07-12")
         "Annonce-Deposee": parser_date_dmy(specs_trouvees.get("date de l'annonce")),
         # Date à laquelle NOUS avons scrapé l'annonce (différent de la date de dépôt)
-        "Annonce-Detectee": datetime.now().strftime("%Y-%m-%d"),
+        "Annonce-Detectee": aujourd_hui(),
         "Statut": None,
     }
 

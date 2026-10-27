@@ -130,6 +130,15 @@ def expire_due_subscriptions(sb):
         except Exception as exc:  # une ligne invalide ne bloque pas les autres
             print(f"[maintenance] abonnement {row.get('user_id')} ignoré : {type(exc).__name__}")
 
+    # Résiliations arrivées au bout de la période payée.
+    (
+        sb.table("subscriptions")
+        .update({"status": "expired", "updated_at": now_iso})
+        .eq("status", "cancelled")
+        .lte("current_period_end", now_iso)
+        .execute()
+    )
+
     # Essais terminés : l'accès est déjà coupé par trial_end, on aligne le statut
     # affiché (badge, page compte).
     (

@@ -186,6 +186,73 @@ create index if not exists idx_subscriptions_due
 -- -------------------------------------------------------------------------
 -- Création automatique du profil et de l'abonnement lors d'un signup Auth
 -- -------------------------------------------------------------------------
+-- Essai gratuit une seule fois par e-mail, après confirmation : voir
+-- supabase/migrations/20261027000000_trial_once_per_email.sql (identique).
+create table if not exists public.trial_claims (
+  email_hash text primary key,
+  user_id uuid,
+  plan text not null,
+  claimed_at timestamptz not null default now()
+);
+
+-- Table interne : aucune policy, donc aucun accès avec les clés anon/auth.
+alter table public.trial_claims enable row level security;
+
+create or replace function public.autodeal_normaliser_email(email text)
+returns text
+language sql
+immutable
+as $$
+  select case
+    when split_part(lower(trim(email)), '@', 2) in ('gmail.com', 'googlemail.com') then
+      replace(split_part(split_part(lower(trim(email)), '@', 1), '+', 1), '.', '') || '@gmail.com'
+    else
+      split_part(split_part(lower(trim(email)), '@', 1), '+', 1) || '@' || split_part(lower(trim(email)), '@', 2)
+  end
+$$;
+
+create or replace function public.autodeal_accorder_essai(uid uuid, email text, requested_role text)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  plan_essai text;
+  inseres integer;
+begin
+  if requested_role = 'samsar' then
+    plan_essai := 'pro';
+  elsif requested_role = 'dealer' then
+    plan_essai := 'business';
+  else
+    return;
+  end if;
+  if email is null or position('@' in email) = 0 then
+    return;
+  end if;
+
+  insert into public.trial_claims(email_hash, user_id, plan)
+  values (md5(public.autodeal_normaliser_email(email)), uid, plan_essai)
+  on conflict (email_hash) do nothing;
+  get diagnostics inseres = row_count;
+  if inseres = 0 then
+    return;  -- essai déjà consommé par cette adresse
+  end if;
+
+  -- Uniquement depuis la formule gratuite jamais payée.
+  update public.subscriptions
+  set plan = plan_essai,
+      status = 'trialing',
+      trial_start = now(),
+      trial_end = now() + interval '14 days',
+      updated_at = now()
+  where user_id = uid
+    and plan = 'free'
+    and status = 'active'
+    and last_payment_at is null;
+end;
+$$;
+
 create or replace function public.handle_autodeal_new_user()
 returns trigger
 language plpgsql
@@ -193,9 +260,6 @@ security definer set search_path = public
 as $$
 declare
   requested_role text;
-  initial_plan text;
-  initial_status text;
-  initial_trial_end timestamptz;
 begin
   requested_role := coalesce(new.raw_user_meta_data->>'account_role', 'user');
   if requested_role not in ('user', 'samsar', 'dealer') then
@@ -210,32 +274,47 @@ begin
   )
   on conflict (user_id) do nothing;
 
-  if requested_role = 'samsar' then
-    initial_plan := 'pro';
-    initial_status := 'trialing';
-    initial_trial_end := now() + interval '14 days';
-  elsif requested_role = 'dealer' then
-    initial_plan := 'business';
-    initial_status := 'trialing';
-    initial_trial_end := now() + interval '14 days';
-  else
-    initial_plan := 'free';
-    initial_status := 'active';
-    initial_trial_end := null;
-  end if;
-
-  insert into public.subscriptions(
-    user_id, plan, status, currency, trial_start, trial_end
-  )
-  values (
-    new.id, initial_plan, initial_status, 'TND',
-    case when initial_status='trialing' then now() else null end,
-    initial_trial_end
-  )
+  insert into public.subscriptions(user_id, plan, status, currency)
+  values (new.id, 'free', 'active', 'TND')
   on conflict (user_id) do nothing;
+
+  -- Confirmation d'e-mail désactivée : l'adresse est déjà "confirmée".
+  if new.email_confirmed_at is not null then
+    perform public.autodeal_accorder_essai(new.id, new.email, requested_role);
+  end if;
   return new;
 end;
 $$;
+
+create or replace function public.handle_autodeal_email_confirmed()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if old.email_confirmed_at is null and new.email_confirmed_at is not null then
+    perform public.autodeal_accorder_essai(
+      new.id,
+      new.email,
+      (select role from public.profiles where user_id = new.id)
+    );
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_confirmed_autodeal on auth.users;
+create trigger on_auth_user_confirmed_autodeal
+after update of email_confirmed_at on auth.users
+for each row execute procedure public.handle_autodeal_email_confirmed();
+
+-- Les essais déjà ouverts comptent comme consommés.
+insert into public.trial_claims(email_hash, user_id, plan, claimed_at)
+select md5(public.autodeal_normaliser_email(u.email)), u.id, s.plan, coalesce(s.trial_start, now())
+from auth.users u
+join public.subscriptions s on s.user_id = u.id
+where s.trial_start is not null and u.email is not null
+on conflict (email_hash) do nothing;
 
 drop trigger if exists on_auth_user_created_autodeal on auth.users;
 create trigger on_auth_user_created_autodeal

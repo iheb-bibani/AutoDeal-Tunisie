@@ -21,10 +21,10 @@ Rôles :
 
 import re
 import sys
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from core.dates import aujourd_hui_ts, annee_courante  # noqa: E402
 
 import pandas as pd
 
@@ -386,7 +386,7 @@ def process_data():
     df.loc[hors_cv, "Puissance_Fiscale"] = pd.NA
 
     # -- Année implausible (< 1980 ou dans le futur)
-    annee_max = datetime.now().year + 1
+    annee_max = annee_courante() + 1
     hors_annee = (df["Année"] < 1980) | (df["Année"] > annee_max)
     if hors_annee.sum():
         print(f"🧹 {hors_annee.sum()} années implausibles mises à vide.")
@@ -400,7 +400,7 @@ def process_data():
     df["Annonce-Deposee"] = pd.to_datetime(df["Annonce-Deposee"], errors="coerce")
     detectee = pd.to_datetime(df.get("Annonce-Detectee"), errors="coerce")
     df["Date_Reference_Annonce"] = df["Annonce-Deposee"].fillna(detectee)
-    aujourd_hui = pd.Timestamp.now().normalize()
+    aujourd_hui = aujourd_hui_ts()
     df["Age_Annonce_Jours"] = (aujourd_hui - df["Date_Reference_Annonce"]).dt.days.clip(lower=0)
 
     # -- Fraîcheur : base "recent" limitée à MAX_DAYS_OLD jours
