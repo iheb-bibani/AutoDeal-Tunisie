@@ -473,11 +473,14 @@ def choisir_modele(stabilite: dict[str, dict], generalisation: dict[str, dict]) 
     if len(tries) > 1:
         second = tries[1]
         bruit = max(stabilite[gagnant]["ecart_type_pct"], stabilite[second]["ecart_type_pct"]) / 100
+        # Départage seulement si le gain aux stress-tests est lui-même
+        # supérieur au bruit : un écart non significatif ne renverse pas le
+        # classement de production.
         if prod[second] - prod[gagnant] < bruit and stress[second] is not None and stress[gagnant] is not None \
-                and stress[second] < stress[gagnant]:
+                and stress[gagnant] - stress[second] > bruit:
             gagnant, raison = second, (
-                f"quasi ex-aequo en production (écart {prod[tries[0]] - prod[second]:+.2%} < bruit {bruit:.2%}) : "
-                f"meilleur aux stress-tests ({stress[second]:.2%} vs {stress[tries[0]]:.2%})"
+                f"quasi ex-aequo en production ({prod[second]:.2%} vs {prod[tries[0]]:.2%}, bruit {bruit:.2%}) : "
+                f"nettement meilleur aux stress-tests ({stress[second]:.2%} vs {stress[tries[0]]:.2%})"
             )
         else:
             raison += f" vs {prod[second]:.2%} pour {second}"

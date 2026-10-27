@@ -123,6 +123,17 @@ def test_selection_ex_aequo_departage_par_les_stress_tests():
     assert gagnant == "B" and "ex-aequo" in raison
 
 
+def test_selection_gain_de_stress_non_significatif_ne_renverse_pas():
+    """Run du 27/10 10h : HGB meilleur de 0,45 pt en production (bruit 0,66),
+    XGB meilleur de 0,23 pt seulement aux stress-tests -> HGB reste retenu."""
+    from core.modele_prediction import choisir_modele
+
+    stab = {"HGB": {"moyenne_pct": 9.88, "ecart_type_pct": 0.58}, "XGB": {"moyenne_pct": 10.33, "ecart_type_pct": 0.66}}
+    gen = {"HGB": _gen(0.1607, []), "XGB": _gen(0.1584, [])}
+    gagnant, raison = choisir_modele(stab, gen)
+    assert gagnant == "HGB", raison
+
+
 def test_erreur_stress_pondere_les_sources_par_volume():
     from core.modele_prediction import erreur_stress
 

@@ -152,7 +152,10 @@ def _source_observee(sources: pd.Series, labels: set[str]) -> pd.Series:
 def _finaliser(suivi, merged, connus, aujourd_hui, nb_disparues):
     """Ajoute les nouvelles annonces, marque les opportunités et écrit le suivi."""
     # ---- Nouvelles annonces --------------------------------------------
-    nouveaux = merged[~merged["Lien"].astype(str).isin(connus)].copy()
+    # Comparaison sur le lien canonique : une annonce tayara dont l'URL change
+    # de ville n'est pas une nouvelle annonce.
+    canon_connus = set(lien_canonique(pd.Series(sorted(connus), dtype=str))) if connus else set()
+    nouveaux = merged[~lien_canonique(merged["Lien"]).isin(canon_connus)].copy()
     if len(nouveaux):
         ajout = pd.DataFrame({
             "Lien": nouveaux["Lien"].astype(str),
@@ -317,8 +320,17 @@ def mettre_a_jour():
         mettre_a_jour_depuis_observations(suivi, merged, connus, aujourd_hui, liens, prix, completes, partielles)
         return
 
-    # Mode historique (aucun scraper n'a publié ses liens vus) : le fichier
-    # fusionné sert de catalogue du jour.
+    # Sans catalogue du jour : le fichier fusionné est CUMULATIF (toutes les
+    # annonces jamais vues). Il ne dit ni ce qui est encore en ligne, ni ce qui
+    # a disparu. On se contente d'ajouter les nouvelles annonces ; dernière vue,
+    # prix, réapparitions et disparitions ne sont pas touchés.
+    # AUTODEAL_SUIVI_HISTORIQUE=1 réactive l'ancien comportement (tests).
+    if os.getenv("AUTODEAL_SUIVI_HISTORIQUE") != "1":
+        print("ℹ️  Aucun catalogue du jour publié par les scrapers : seules les nouvelles annonces sont ajoutées.")
+        _finaliser(suivi, merged, connus, aujourd_hui, 0)
+        return
+
+    # Mode historique : le fichier fusionné sert de catalogue du jour.
     liens_du_jour = set(merged["Lien"].astype(str))
     print(f"Annonces vues aujourd'hui : {len(liens_du_jour)}")
 
@@ -358,6 +370,10 @@ def mettre_a_jour():
             print(f"↩️  {int(revenues.sum())} annonce(s) réapparue(s) — remises en actif.")
 
     # ---- Disparitions ---------------------------------------------------
+    # Mode historique : le fichier fusionné est CUMULATIF, une annonce qui en
+    # sort a été retirée par un filtre ou un dédoublonnage, pas par le vendeur.
+    # Aucune disparition n'est donc déclarée sans catalogue du jour publié par
+    # les scrapers (AUTODEAL_SUIVI_HISTORIQUE=1 réactive l'ancien comportement).
     nb_disparues = 0
     if len(suivi) and not scraping_suspect:
         disparues = (

@@ -36,6 +36,8 @@ def env(tmp_path, monkeypatch):
     # Par défaut : aucun fichier de liens vus (mode historique).
     monkeypatch.setattr(sa, "charger_catalogues", lambda: {})
     monkeypatch.setattr(sa, "MANIFESTE", str(tmp_path / "pas_de_manifeste.json"))
+    # Les tests historiques exercent les garde-fous de l'ancien mode.
+    monkeypatch.setenv("AUTODEAL_SUIVI_HISTORIQUE", "1")
     return tmp_path, monkeypatch, suivi
 
 
@@ -184,3 +186,32 @@ def test_catalogue_partiel_ne_juge_que_la_fenetre_couverte(env):
     res = _charger(suivi)
     assert res.loc["R0", "Statut"] == "Disparue"
     assert (res.loc[anciens, "Statut"] == "Active").all()
+
+
+def test_sans_catalogue_du_jour_aucune_disparition(env):
+    """Fichier fusionné cumulatif : une annonce qui en sort (filtre,
+    dédoublonnage) n'a pas été vendue."""
+    tmp_path, monkeypatch, suivi = env
+    monkeypatch.delenv("AUTODEAL_SUIVI_HISTORIQUE")
+    monkeypatch.setitem(sa.PROCESSED_FILES, "merged", _merged(tmp_path, ["A", "B", "C"]))
+    sa.mettre_a_jour()
+    monkeypatch.setitem(sa.PROCESSED_FILES, "merged", _merged(tmp_path, ["A", "B"]))
+    sa.mettre_a_jour()
+    assert (_charger(suivi)["Statut"] == "Active").all()
+
+
+def test_sans_catalogue_une_disparition_reelle_n_est_pas_annulee(env):
+    """Une disparition détectée un jour avec catalogue ne doit pas être
+    « annulée » un jour sans catalogue parce que le lien reste dans le
+    fichier cumulatif."""
+    tmp_path, monkeypatch, suivi = env
+    monkeypatch.delenv("AUTODEAL_SUIVI_HISTORIQUE")
+    liens = [f"L{i}" for i in range(10)]
+    monkeypatch.setitem(sa.PROCESSED_FILES, "merged", _merged(tmp_path, liens, ["tayara.tn"] * 10))
+    monkeypatch.setattr(sa, "charger_catalogues", lambda: _cats(tayara={l: None for l in liens}))
+    sa.mettre_a_jour()
+    monkeypatch.setattr(sa, "charger_catalogues", lambda: _cats(tayara={l: None for l in liens[1:]}))
+    sa.mettre_a_jour()
+    monkeypatch.setattr(sa, "charger_catalogues", lambda: {})
+    sa.mettre_a_jour()
+    assert _charger(suivi).loc["L0", "Statut"] == "Disparue"
