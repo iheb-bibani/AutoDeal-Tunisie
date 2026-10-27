@@ -225,8 +225,10 @@ def scraper():
     if not cartes:
         print("❌ Aucune carte d'annonce extraite (structure changée ?).")
         sys.exit(1)
-    if fin_naturelle and liens_vus:
-        enregistrer_liens_vus("autocentral", liens_vus)
+    if liens_vus:
+        enregistrer_liens_vus("autocentral", liens_vus, complet=fin_naturelle, nouvelles=gardes)
+    print(f"ℹ️ {len(cartes)} carte(s) extraite(s), {len(liens_vus)} hors sources directes, "
+          f"{sum(1 for c in cartes if c['source'] not in SOURCES_DEJA_VUES and not parser_carte(c)['Prix_DT'])} sans prix lisible.")
 
     print(f"✅ Terminé : {gardes} annonce(s) NOUVELLE(s) gardée(s), "
           f"{ignores} ignorée(s) (déjà scrapées via leur source d'origine) -> {FICHIER}")

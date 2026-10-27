@@ -79,7 +79,7 @@ def age_derniere_detection_heures(
     """Âge de la dernière NOUVELLE annonce détectée, pas du dernier run scraper."""
     if df is None or df.empty or "Annonce-Detectee" not in df.columns:
         return None
-    dates = pd.to_datetime(df["Annonce-Detectee"], errors="coerce", utc=True)
+    dates = pd.to_datetime(df["Annonce-Detectee"], errors="coerce", utc=True, format="mixed")
     latest = dates.max()
     if pd.isna(latest):
         return None
@@ -163,9 +163,14 @@ def controler() -> int:
     par_source: dict[str, int] = {}
     sources_directes_ok = 0
 
+    catalogues = (manifest or {}).get("catalogues") or {}
     for nom, chemin in SCRAPERS.items():
         df, erreur_lecture = _lire_csv(chemin)
-        n = 0 if df is None else len(df)
+        # Volume du JOUR (liens vus sur les pages de liste) quand le scraper l'a
+        # publié : le CSV brut est cumulatif et passait le plancher même quand
+        # le scraping du jour n'avait rien trouvé.
+        cat = catalogues.get(nom) or {}
+        n = int(cat["liens_vus"]) if cat.get("liens_vus") is not None else (0 if df is None else len(df))
         par_source[nom] = n
         directe = nom in SOURCES_DIRECTES
         run_ok = scraper_a_reussi(manifest, nom)

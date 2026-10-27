@@ -22,6 +22,10 @@ def _merged(tmp_path, liens, sources=None):
     return str(chemin)
 
 
+def _cats(complet=True, **sources):
+    return {k: {"liens": v, "complet": complet} for k, v in sources.items()}
+
+
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     suivi = tmp_path / "suivi.csv"
@@ -30,7 +34,7 @@ def env(tmp_path, monkeypatch):
         sa, "FICHIER_ALERTES", str(tmp_path / "inexistant_alertes.csv")
     )
     # Par défaut : aucun fichier de liens vus (mode historique).
-    monkeypatch.setattr(sa, "charger_liens_vus", lambda: {})
+    monkeypatch.setattr(sa, "charger_catalogues", lambda: {})
     monkeypatch.setattr(sa, "MANIFESTE", str(tmp_path / "pas_de_manifeste.json"))
     return tmp_path, monkeypatch, suivi
 
@@ -117,14 +121,14 @@ def test_liens_vus_permettent_les_disparitions_malgre_un_fichier_cumulatif(env):
     liens = [f"L{i}" for i in range(10)]
     merged = _merged(tmp_path, liens, ["tayara.tn"] * 10)
     monkeypatch.setitem(sa.PROCESSED_FILES, "merged", merged)
-    monkeypatch.setattr(sa, "charger_liens_vus", lambda: {"tayara": {l: "20000" for l in liens}})
+    monkeypatch.setattr(sa, "charger_catalogues", lambda: _cats(tayara={l: "20000" for l in liens}))
     sa.mettre_a_jour()
 
     # Le lendemain : le fichier fusionné contient toujours les 10 liens, mais
     # la page de liste n'en montre plus que 9 (L0 vendue, prix de L1 baissé).
     vus = {l: "20000" for l in liens[1:]}
     vus["L1"] = "18 500"
-    monkeypatch.setattr(sa, "charger_liens_vus", lambda: {"tayara": vus})
+    monkeypatch.setattr(sa, "charger_catalogues", lambda: _cats(tayara=vus))
     sa.mettre_a_jour()
     df = _charger(suivi)
     assert df.loc["L0", "Statut"] == "Disparue"
@@ -138,8 +142,8 @@ def test_source_non_observee_ou_en_echec_ne_fait_rien_disparaitre(env):
     liens_a = [f"A{i}" for i in range(5)]
     merged = _merged(tmp_path, liens_t + liens_a, ["tayara.tn"] * 5 + ["automobile.tn"] * 5)
     monkeypatch.setitem(sa.PROCESSED_FILES, "merged", merged)
-    monkeypatch.setattr(sa, "charger_liens_vus", lambda: {
-        "tayara": {l: None for l in liens_t}, "automobile": {l: None for l in liens_a}})
+    monkeypatch.setattr(sa, "charger_catalogues", lambda: _cats(
+        tayara={l: None for l in liens_t}, automobile={l: None for l in liens_a}))
     sa.mettre_a_jour()
 
     # automobile n'a rien publié aujourd'hui ; tayara a échoué selon le manifeste.
@@ -147,7 +151,36 @@ def test_source_non_observee_ou_en_echec_ne_fait_rien_disparaitre(env):
     manifeste = tmp_path / "run.json"
     manifeste.write_text(json.dumps({"scrapers": {"tayara": {"status": "timeout"}, "automax": {"status": "success"}}}))
     monkeypatch.setattr(sa, "MANIFESTE", str(manifeste))
-    monkeypatch.setattr(sa, "charger_liens_vus", lambda: {"tayara": {}, "automax": {"X": None}})
+    monkeypatch.setattr(sa, "charger_catalogues", lambda: _cats(tayara={}, automax={"X": None}))
     sa.mettre_a_jour()
     df = _charger(suivi)
     assert (df["Statut"] == "Active").all()
+
+
+def test_catalogue_partiel_ne_juge_que_la_fenetre_couverte(env):
+    """tayara plafonné : les annonces récentes non revues disparaissent, les
+    anciennes (au-delà des pages vues) restent actives."""
+    tmp_path, monkeypatch, suivi = env
+    recents = [f"R{i}" for i in range(80)]
+    anciens = [f"A{i}" for i in range(20)]
+    liens = recents + anciens
+    df = pd.DataFrame({
+        "Lien": liens, "Prix": 20000, "Source": "tayara.tn", "Marque": "Peugeot",
+        "Modèle": "208", "Année": 2018, "Localisation": "Tunis",
+        # Récentes étalées du 25/10 au 06/10 (R0 la plus récente), anciennes en juin.
+        "Annonce-Deposee": [str((pd.Timestamp("2026-10-25") - pd.Timedelta(days=i // 4)).date()) for i in range(80)]
+        + ["2026-06-01"] * 20,
+    })
+    chemin = tmp_path / "merged.csv"
+    df.to_csv(chemin, sep=";", index=False, encoding="utf-8-sig")
+    monkeypatch.setitem(sa.PROCESSED_FILES, "merged", str(chemin))
+    monkeypatch.setattr(sa, "charger_catalogues", lambda: _cats(tayara={l: None for l in liens}))
+    sa.mettre_a_jour()
+
+    # Run partiel : seules les pages récentes sont vues, R0 n'y est plus.
+    vus = {l: None for l in recents[1:]}
+    monkeypatch.setattr(sa, "charger_catalogues", lambda: _cats(complet=False, tayara=vus))
+    sa.mettre_a_jour()
+    res = _charger(suivi)
+    assert res.loc["R0", "Statut"] == "Disparue"
+    assert (res.loc[anciens, "Statut"] == "Active").all()

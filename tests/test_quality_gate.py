@@ -41,3 +41,43 @@ def test_old_listing_date_does_not_mean_scraper_failed():
     assert age_derniere_detection_heures(df, now) > 36
     manifest = {"scrapers": {"automax": {"status": "success"}}}
     assert scraper_a_reussi(manifest, "automax") is True
+
+
+def _gate_env(tmp_path, monkeypatch, catalogues, detect_status="success"):
+    import core.quality_gate as qg
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    raw = {}
+    for nom in ["tayara", "automax", "automobile", "sayyarat", "autocentral"]:
+        chemin = tmp_path / f"{nom}.csv"
+        pd.DataFrame({"Lien": [f"{nom}{i}" for i in range(500)], "Annonce-Detectee": today}).to_csv(
+            chemin, sep=";", index=False, encoding="utf-8-sig")
+        raw[nom] = str(chemin)
+    scored = tmp_path / "scored.csv"
+    pd.DataFrame({"Lien": [f"L{i}" for i in range(400)], "Prix": 40000, "Marque": "Kia", "Modèle": "Rio"}).to_csv(
+        scored, sep=";", index=False, encoding="utf-8-sig")
+    manifest = {"scrapers": {n: {"status": "success"} for n in raw},
+                "processing": {"core/detect_deals.py": {"status": detect_status}},
+                "catalogues": catalogues}
+    monkeypatch.setattr(qg, "SCRAPERS", raw)
+    monkeypatch.setattr(qg, "PROCESSED_FILES", {"scored": str(scored)})
+    monkeypatch.setattr(qg, "BASELINE_PATH", tmp_path / "baseline.json")
+    monkeypatch.setattr(qg, "_charger_manifest_courant", lambda *a, **k: manifest)
+    monkeypatch.setattr(qg.sys, "argv", ["quality_gate.py"])
+    return qg
+
+
+def test_gate_utilise_le_volume_du_jour_et_non_le_csv_cumulatif(tmp_path, monkeypatch):
+    # CSV bruts bien remplis (cumulatifs) mais 2 sources directes n'ont rien vu aujourd'hui.
+    qg = _gate_env(tmp_path, monkeypatch, {"tayara": {"liens_vus": 0}, "automobile": {"liens_vus": 3}})
+    assert qg.controler() == 1
+
+
+def test_gate_passe_avec_des_catalogues_du_jour_corrects(tmp_path, monkeypatch):
+    qg = _gate_env(tmp_path, monkeypatch, {"tayara": {"liens_vus": 2000}, "automobile": {"liens_vus": 1500}})
+    assert qg.controler() == 0
+
+
+def test_gate_bloque_si_detect_deals_a_echoue(tmp_path, monkeypatch):
+    qg = _gate_env(tmp_path, monkeypatch, {}, detect_status="failed")
+    assert qg.controler() == 1

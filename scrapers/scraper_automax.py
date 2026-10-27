@@ -512,6 +512,7 @@ def lancer_scraper():
     offset = 0
     liens_vus: dict[str, None] = {}
     fin_naturelle = False
+    nb_nouvelles = 0
 
     for _ in range(MAX_PAGES_AUTOMAX):
 
@@ -583,6 +584,7 @@ def lancer_scraper():
             if data:
 
                 sauvegarder([data])
+                nb_nouvelles += 1
 
             time.sleep(
                 random.uniform(2,4)
@@ -595,10 +597,10 @@ def lancer_scraper():
     if not liens_vus:
         print("❌ Aucune annonce collectée (site indisponible ou structure changée).")
         sys.exit(1)
-    if fin_naturelle:
-        enregistrer_liens_vus("automax", liens_vus)
-    else:
-        print("⚠️ Catalogue incomplet : liens vus non publiés.")
+    enregistrer_liens_vus("automax", liens_vus, complet=fin_naturelle, pages=offset // 12 + 1,
+                          nouvelles=nb_nouvelles)
+    if not fin_naturelle:
+        print("⚠️ Catalogue partiel : suivi limité aux annonces récentes.")
 
     print(
         "SCRAPING TERMINE"

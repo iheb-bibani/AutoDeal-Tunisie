@@ -164,6 +164,16 @@ def executer_pipeline_auto() -> None:
         _write_manifest(manifest)
         time.sleep(2)
 
+    # Ce que chaque scraper a réellement vu aujourd'hui (liens des pages de
+    # liste, catalogue complet ou non, annonces nouvelles enregistrées).
+    try:
+        from scrapers.liens_vus import resume_catalogues
+
+        manifest["catalogues"] = resume_catalogues()
+        _write_manifest(manifest)
+    except Exception as exc:  # observabilité seulement : ne bloque jamais le run
+        print(f"⚠️ Résumé des catalogues indisponible : {exc}")
+
     scrapers_ok = sum(
         x.get("status") == "success" for x in manifest["scrapers"].values()
     )

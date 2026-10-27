@@ -240,8 +240,7 @@ def scraper():
         # Page 1 vide = site indisponible ou structure changée : échec visible.
         print("❌ Aucune annonce sur la page 1.")
         sys.exit(1)
-    if fin_naturelle:
-        enregistrer_liens_vus("sayyarat", liens_vus)
+    enregistrer_liens_vus("sayyarat", liens_vus, complet=fin_naturelle, nouvelles=total)
     print(f"✅ Terminé : {total} nouvelle(s) annonce(s) -> {FICHIER}")
 
 

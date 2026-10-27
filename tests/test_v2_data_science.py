@@ -88,24 +88,44 @@ def test_ecriture_atomique_ne_laisse_pas_de_fichier_partiel(tmp_path):
     assert [p.name for p in tmp_path.iterdir()] == ["f.csv"]
 
 
-def test_selection_quasi_ex_aequo_departagee_par_la_stabilite():
+def _gen(gkf, sources):
+    return {"groupkfold_marque_modele": {"mdape": gkf},
+            "source_holdout": [{"source": n, "n_test": k, "mdape": m} for n, k, m in sources]}
+
+
+def test_selection_production_d_abord_avec_garde_fou_stress():
+    """Cas réel du 27/10 : HGB meilleur en production, XGB un peu meilleur aux
+    stress-tests mais dans la tolérance -> HGB retenu."""
     from core.modele_prediction import choisir_modele
 
-    stab = {"HGB": {"moyenne_pct": 9.4, "ecart_type_pct": 0.2}, "XGB": {"moyenne_pct": 9.9, "ecart_type_pct": 0.4}}
-    # XGB a un score robuste à peine meilleur, sous le bruit (0,4 pt) : HGB l'emporte.
-    gagnant, raison = choisir_modele({"HGB": 0.1343, "XGB": 0.1323}, stab)
-    assert gagnant == "HGB" and "ex-aequo" in raison
-    # Écart net (> bruit) : le meilleur score robuste l'emporte.
-    gagnant, _ = choisir_modele({"HGB": 0.150, "XGB": 0.130}, stab)
-    assert gagnant == "XGB"
+    stab = {"HGB": {"moyenne_pct": 9.25, "ecart_type_pct": 0.27}, "XGB": {"moyenne_pct": 9.86, "ecart_type_pct": 0.30}}
+    sources = lambda a, b, c: [("autocentral", 96, a), ("automobile", 1886, b), ("tayara", 1376, c)]  # noqa: E731
+    gen = {"HGB": _gen(0.1677, sources(0.485, 0.148, 0.129)), "XGB": _gen(0.150, sources(0.492, 0.138, 0.113))}
+    gagnant, raison = choisir_modele(stab, gen)
+    assert gagnant == "HGB", raison
 
 
-def test_score_robuste_pondere_les_sources_par_volume():
-    from core.modele_prediction import score_robuste
+def test_selection_ecarte_un_modele_qui_generalise_mal():
+    from core.modele_prediction import choisir_modele
 
-    gen = {"groupkfold_marque_modele": {"mdape": 0.16},
-           "source_holdout": [{"source": "petite", "n_test": 100, "mdape": 0.50},
-                              {"source": "grande", "n_test": 900, "mdape": 0.10}]}
-    s = score_robuste(gen, {"moyenne_pct": 10.0})
+    stab = {"A": {"moyenne_pct": 9.0, "ecart_type_pct": 0.2}, "B": {"moyenne_pct": 9.5, "ecart_type_pct": 0.2}}
+    gen = {"A": _gen(0.30, [("s", 100, 0.30)]), "B": _gen(0.15, [("s", 100, 0.15)])}
+    gagnant, raison = choisir_modele(stab, gen)
+    assert gagnant == "B" and "écarté" in raison
+
+
+def test_selection_ex_aequo_departage_par_les_stress_tests():
+    from core.modele_prediction import choisir_modele
+
+    stab = {"A": {"moyenne_pct": 9.40, "ecart_type_pct": 0.30}, "B": {"moyenne_pct": 9.50, "ecart_type_pct": 0.30}}
+    gen = {"A": _gen(0.17, [("s", 100, 0.14)]), "B": _gen(0.155, [("s", 100, 0.13)])}
+    gagnant, raison = choisir_modele(stab, gen)
+    assert gagnant == "B" and "ex-aequo" in raison
+
+
+def test_erreur_stress_pondere_les_sources_par_volume():
+    from core.modele_prediction import erreur_stress
+
+    gen = _gen(0.16, [("petite", 100, 0.50), ("grande", 900, 0.10)])
     # sources : 0,5*0,1 + 0,1*0,9 = 0,14 (et non 0,30 en moyenne simple)
-    assert abs(s - (0.10 + 0.16 + 0.14) / 3) < 1e-9
+    assert abs(erreur_stress(gen) - (0.16 + 0.14) / 2) < 1e-9

@@ -23,7 +23,7 @@ import pandas as pd
 
 from config import PROCESSED_FILES
 from core.io_atomique import ecrire_csv_atomique
-from scrapers.liens_vus import SOURCE_LABELS, charger_liens_vus
+from scrapers.liens_vus import SOURCE_LABELS, charger_catalogues
 from scrapers.parsing import parser_prix_tnd
 
 MANIFESTE = "data/processed/pipeline_run.json"
@@ -35,6 +35,14 @@ FICHIER_ALERTES = "data/processed/alertes_bonnes_affaires.csv"
 # considère le scraping comme incomplet. Ce seuil s'applique au total et à
 # chaque source indépendamment.
 SEUIL_VOLUME_SUSPECT = 0.60
+
+# Catalogue partiel (plafond de pages) : les pages de liste sont triées par
+# date. On ne juge les disparitions que pour les annonces déposées après le
+# 1er quartile des dates de dépôt observées (prudent : les annonces anciennes
+# « remontées » en tête de liste tirent le minimum vers le bas), plus une marge.
+QUANTILE_COUVERTURE = 0.25
+MARGE_COUVERTURE_JOURS = 2
+MIN_LIENS_DATES_COUVERTURE = 50
 
 COLONNES_SNAPSHOT = ["Source", "Marque", "Modèle", "Année", "Localisation"]
 
@@ -94,27 +102,42 @@ def _sources_echouees() -> set[str]:
     return {k for k, v in scrapers.items() if isinstance(v, dict) and v.get("status") != "success"}
 
 
-def observations_du_jour() -> tuple[set[str], dict[str, float], set[str]] | None:
+def observations_du_jour():
     """Liens réellement vus aujourd'hui par les scrapers ayant abouti.
 
-    Renvoie (liens, prix_affiches, labels_sources_observees) ou None si aucun
-    scraper n'a publié ses liens vus (mode historique).
+    Renvoie (liens, prix_affiches, sources_completes, sources_partielles) ou
+    None si aucun scraper n'a publié de catalogue (mode historique).
+    ``sources_partielles`` : {label: ensemble des liens vus pour cette source}.
     """
-    vus = charger_liens_vus()
+    catalogues = charger_catalogues()
     echecs = _sources_echouees()
     liens: set[str] = set()
     prix: dict[str, float] = {}
-    labels: set[str] = set()
-    for source, liens_prix in vus.items():
+    completes: set[str] = set()
+    partielles: dict[str, set[str]] = {}
+    for source, cat in catalogues.items():
         if source in echecs or source not in SOURCE_LABELS:
             continue
-        labels.add(SOURCE_LABELS[source])
-        for lien, p in liens_prix.items():
-            liens.add(str(lien))
+        label = SOURCE_LABELS[source]
+        vus_source = {str(lien) for lien in cat["liens"]}
+        if cat.get("complet"):
+            completes.add(label)
+        else:
+            partielles[label] = vus_source
+        liens |= vus_source
+        for lien, p in cat["liens"].items():
             v = parser_prix_tnd(f"{p} DT") if p not in (None, "", "N/A") else None
             if v:
                 prix[str(lien)] = float(v)
-    return (liens, prix, labels) if labels else None
+    return (liens, prix, completes, partielles) if (completes or partielles) else None
+
+
+def date_couverture(liens_vus_source: set[str], dates_depot: pd.Series) -> pd.Timestamp | None:
+    """Date à partir de laquelle un catalogue partiel est jugé exhaustif."""
+    dates = dates_depot.reindex(list(liens_vus_source)).dropna()
+    if len(dates) < MIN_LIENS_DATES_COUVERTURE:
+        return None
+    return dates.quantile(QUANTILE_COUVERTURE) + pd.Timedelta(days=MARGE_COUVERTURE_JOURS)
 
 
 def _source_observee(sources: pd.Series, labels: set[str]) -> pd.Series:
@@ -195,24 +218,46 @@ def _finaliser(suivi, merged, connus, aujourd_hui, nb_disparues):
     print("-" * 30)
 
 
-def mettre_a_jour_depuis_observations(suivi, merged, connus, aujourd_hui, liens_vus, prix_vus, labels):
+def mettre_a_jour_depuis_observations(suivi, merged, connus, aujourd_hui, liens_vus, prix_vus, labels,
+                                      partielles=None):
     """Suivi fondé sur les liens réellement observés par chaque scraper.
 
     Une annonce ne peut disparaître que si SA source a été observée
-    aujourd'hui, et que le volume observé de cette source est crédible.
+    aujourd'hui (catalogue complet, ou catalogue partiel couvrant sa date de
+    dépôt), et que le volume observé de cette source est crédible.
     """
-    print(f"Annonces vues aujourd'hui (pages de liste) : {len(liens_vus)} — sources : {', '.join(sorted(labels))}")
-    prix_merged = merged.set_index(merged["Lien"].astype(str))["Prix"] if "Prix" in merged else pd.Series(dtype=float)
+    partielles = partielles or {}
+    tous = sorted(labels | set(partielles))
+    print(f"Annonces vues aujourd'hui (pages de liste) : {len(liens_vus)} — sources : {', '.join(tous)}")
+    liens_merged = merged["Lien"].astype(str)
+    prix_merged = merged.set_index(liens_merged)["Prix"] if "Prix" in merged else pd.Series(dtype=float)
+    depot_merged = (
+        pd.to_datetime(merged.set_index(liens_merged)["Annonce-Deposee"], errors="coerce")
+        if "Annonce-Deposee" in merged else pd.Series(dtype="datetime64[ns]")
+    )
+    depot_merged = depot_merged[~depot_merged.index.duplicated(keep="last")]
 
     if len(suivi):
         source_suivi = suivi["Source"] if "Source" in suivi.columns else pd.Series(pd.NA, index=suivi.index)
         observee = _source_observee(source_suivi, labels)
         vue = suivi["Lien"].astype(str).isin(liens_vus)
 
-        # Garde-fou par source : volume vu vs actifs connus de cette source.
+        # Catalogues partiels : seulement la fenêtre de dates réellement couverte.
+        depot_suivi = suivi["Lien"].astype(str).map(depot_merged)
+        for label, vus_label in partielles.items():
+            debut = date_couverture(vus_label, depot_merged)
+            if debut is None:
+                print(f"ℹ️  {label} : catalogue partiel sans dates exploitables — pas de disparition.")
+                continue
+            couverte = _source_observee(source_suivi, {label}) & (depot_suivi >= debut)
+            observee |= couverte
+            print(f"ℹ️  {label} : catalogue partiel, disparitions jugées pour les dépôts ≥ {debut.date()}.")
+
+        # Garde-fou par source : volume vu vs actifs connus de cette source
+        # (dans la fenêtre observée).
         suspects = set()
-        for label in labels:
-            de_la_source = source_suivi.fillna("").astype(str).str.startswith(label)
+        for label in tous:
+            de_la_source = source_suivi.fillna("").astype(str).str.startswith(label) & observee
             actifs = int((de_la_source & (suivi["Statut"] == "Active")).sum())
             vus_source = int((de_la_source & vue).sum())
             if actifs and vus_source < actifs * SEUIL_VOLUME_SUSPECT:
@@ -259,7 +304,8 @@ def mettre_a_jour():
 
     observations = observations_du_jour()
     if observations is not None:
-        mettre_a_jour_depuis_observations(suivi, merged, connus, aujourd_hui, *observations)
+        liens, prix, completes, partielles = observations
+        mettre_a_jour_depuis_observations(suivi, merged, connus, aujourd_hui, liens, prix, completes, partielles)
         return
 
     # Mode historique (aucun scraper n'a publié ses liens vus) : le fichier

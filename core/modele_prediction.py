@@ -406,49 +406,85 @@ def diagnostic_stabilite(df, X, y, pipelines, seeds=(7, 21, 42, 84, 123), groups
         }
     return out
 
-def score_robuste(generalisation: dict, stabilite: dict) -> float:
-    """Erreur « robuste » d'un finaliste (plus bas = meilleur).
+# Un finaliste plus précis en production reste retenu tant que sa
+# dégradation sur les stress-tests ne dépasse pas celle du meilleur de plus de
+# 15 % (relatif). Au-delà, il généralise trop mal pour être sûr.
+TOLERANCE_STRESS = 0.15
 
-    Moyenne de trois familles de tests, à poids égal :
-    - stabilité : 5 CV groupées (seeds) + 3 holdouts temporels ;
-    - GroupKFold marque-modèle (familles jamais vues) ;
-    - leave-one-source-out, moyenne PONDÉRÉE par le nombre d'annonces testées.
 
-    Avant : la CV et le holdout temporel n'étaient comptés qu'une fois chacun,
-    et la moyenne des sources n'était pas pondérée — la petite source
-    autocentral (bruitée, déjà en quarantaine) pesait autant que tayara ou
-    automobile.tn et décidait seule du modèle retenu.
-    """
-    valeurs = [stabilite["moyenne_pct"] / 100]
+def erreur_production(stabilite: dict) -> float:
+    """Erreur dans le scénario réel : nouvelles annonces de marques/modèles et
+    de sources déjà connus. Moyenne de 5 CV groupées par véhicule (seeds
+    différentes) + 3 holdouts temporels (15/20/25 % les plus récents)."""
+    return float(stabilite["moyenne_pct"]) / 100
+
+
+def erreur_stress(generalisation: dict) -> float | None:
+    """Erreur hors distribution : familles marque-modèle jamais vues et
+    leave-one-source-out (moyenne PONDÉRÉE par le volume testé, sinon une
+    petite source bruitée pèse autant que tayara ou automobile.tn)."""
+    valeurs = []
     if generalisation.get("groupkfold_marque_modele"):
         valeurs.append(generalisation["groupkfold_marque_modele"]["mdape"])
     src = generalisation.get("source_holdout") or []
     poids = [max(int(x.get("n_test") or 0), 0) for x in src]
     if src and sum(poids):
         valeurs.append(float(np.average([x["mdape"] for x in src], weights=poids)))
-    return float(np.mean(valeurs))
+    return float(np.mean(valeurs)) if valeurs else None
 
 
-def choisir_modele(scores: dict[str, float], stabilite: dict[str, dict]) -> tuple[str, str]:
-    """Retient le meilleur score robuste, sauf quasi ex-aequo.
+def score_robuste(generalisation: dict, stabilite: dict) -> float:
+    """Indicateur synthétique affiché (moyenne production + stress). La
+    décision, elle, suit ``choisir_modele``."""
+    stress = erreur_stress(generalisation)
+    prod = erreur_production(stabilite)
+    return prod if stress is None else (prod + stress) / 2
 
-    Si l'écart de score robuste est inférieur au bruit mesuré (écart-type de
-    stabilité du finaliste le plus instable), la différence n'est pas
-    significative : on retient le modèle le plus précis ET stable en
-    validation répétée (moyenne de stabilité la plus basse).
+
+def choisir_modele(stabilite: dict[str, dict], generalisation: dict[str, dict]) -> tuple[str, str]:
+    """Choisit le modèle de production.
+
+    1. Critère principal : erreur de production (``erreur_production``).
+    2. Garde-fou : un candidat est écarté si son erreur de stress dépasse la
+       meilleure de plus de ``TOLERANCE_STRESS`` (relatif).
+    3. Quasi ex-aequo en production (écart < bruit mesuré, l'écart-type de
+       stabilité) : le meilleur en stress-test l'emporte.
+
+    L'ancienne règle donnait deux tiers du poids aux stress-tests et faisait
+    alterner le modèle retenu d'une nuit à l'autre.
     """
-    tries = sorted(scores, key=scores.get)
-    if len(tries) == 1:
-        return tries[0], "seul candidat"
-    a, b = tries[0], tries[1]
-    bruit = max(stabilite[a]["ecart_type_pct"], stabilite[b]["ecart_type_pct"]) / 100
-    if scores[b] - scores[a] < bruit:
-        gagnant = min((a, b), key=lambda k: stabilite[k]["moyenne_pct"])
-        return gagnant, (
-            f"quasi ex-aequo (écart {abs(scores[b] - scores[a]):.2%} < bruit {bruit:.2%}) : "
-            f"meilleure stabilité ({stabilite[gagnant]['moyenne_pct']:.2f} %)"
+    noms = list(stabilite)
+    if len(noms) == 1:
+        return noms[0], "seul candidat"
+    prod = {n: erreur_production(stabilite[n]) for n in noms}
+    stress = {n: erreur_stress(generalisation.get(n, {})) for n in noms}
+    stress_connus = [v for v in stress.values() if v is not None]
+    meilleur_stress = min(stress_connus) if stress_connus else None
+
+    def eligible(n):
+        return meilleur_stress is None or stress[n] is None or stress[n] <= meilleur_stress * (1 + TOLERANCE_STRESS)
+
+    candidats = [n for n in noms if eligible(n)] or noms
+    ecartes = [n for n in noms if n not in candidats]
+    tries = sorted(candidats, key=prod.get)
+    gagnant = tries[0]
+    raison = f"meilleure erreur de production ({prod[gagnant]:.2%})"
+    if len(tries) > 1:
+        second = tries[1]
+        bruit = max(stabilite[gagnant]["ecart_type_pct"], stabilite[second]["ecart_type_pct"]) / 100
+        if prod[second] - prod[gagnant] < bruit and stress[second] is not None and stress[gagnant] is not None \
+                and stress[second] < stress[gagnant]:
+            gagnant, raison = second, (
+                f"quasi ex-aequo en production (écart {prod[tries[0]] - prod[second]:+.2%} < bruit {bruit:.2%}) : "
+                f"meilleur aux stress-tests ({stress[second]:.2%} vs {stress[tries[0]]:.2%})"
+            )
+        else:
+            raison += f" vs {prod[second]:.2%} pour {second}"
+    if ecartes:
+        raison += " ; écarté(s) pour mauvaise généralisation : " + ", ".join(
+            f"{n} (stress {stress[n]:.2%})" for n in ecartes
         )
-    return a, f"meilleur score robuste ({scores[a]:.2%} vs {scores[b]:.2%})"
+    return gagnant, raison
 
 
 def diagnostic_boite(df, candidats_noms, n_splits=5, groups=None):
@@ -516,7 +552,7 @@ def main():
     scores_robustes = {nom: score_robuste(robustes[nom], stabilite[nom]) for nom in shortlist}
     for nom in shortlist:
         print(f"  {nom:22s} score robuste={scores_robustes[nom]:.2%}")
-    meilleur_nom, raison_choix = choisir_modele(scores_robustes, stabilite)
+    meilleur_nom, raison_choix = choisir_modele(stabilite, robustes)
     print(f"  Choix : {raison_choix}")
     meilleur_pipeline = resultats[meilleur_nom]["pipeline"]
     erreur_relative_typique = resultats[meilleur_nom]["mdape"]
@@ -540,11 +576,15 @@ def main():
         ],
         "selection_robuste": {
             "shortlist": [
-                {"nom": nom, "score_robuste_pct": round(scores_robustes[nom] * 100, 2)}
+                {"nom": nom, "score_robuste_pct": round(scores_robustes[nom] * 100, 2),
+                 "erreur_production_pct": round(erreur_production(stabilite[nom]) * 100, 2),
+                 "erreur_stress_pct": (None if erreur_stress(robustes[nom]) is None
+                                       else round(erreur_stress(robustes[nom]) * 100, 2))}
                 for nom in shortlist
             ],
-            "regle": "moyenne : stabilité (5 CV groupées + 3 holdouts temporels) + GroupKFold marque-modèle "
-                     "+ source-holdouts pondérés par volume ; quasi ex-aequo départagé par la stabilité",
+            "regle": "erreur de production (5 CV groupées + 3 holdouts temporels) ; garde-fou : stress-tests "
+                     f"(GroupKFold marque-modèle + sources pondérées) ≤ meilleur +{TOLERANCE_STRESS:.0%} ; "
+                     "quasi ex-aequo départagé par les stress-tests",
             "raison": raison_choix,
         },
         "validation_robuste": generalisation,

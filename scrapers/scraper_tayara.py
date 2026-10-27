@@ -310,11 +310,13 @@ def scrape_tayara():
             browser.close()
             print("❌ Aucune annonce sur la page 1 : structure du site changée ou blocage.")
             sys.exit(1)
-        if pagination_complete:
-            # Catalogue du jour pour le suivi des disparitions (core/suivi_annonces.py).
-            enregistrer_liens_vus("tayara", liens_vus)
-        else:
-            print("⚠️ Pagination interrompue : liens vus non publiés (pas de fausses disparitions).")
+        # Catalogue du jour pour le suivi (core/suivi_annonces.py). Publié AVANT
+        # la visite des fiches : un timeout pendant les fiches ne le perd pas.
+        # Un catalogue partiel n'est exploité que sur la fenêtre de dates couverte.
+        pages_vues = page_num - 1
+        enregistrer_liens_vus("tayara", liens_vus, complet=pagination_complete, pages=pages_vues)
+        if not pagination_complete:
+            print(f"⚠️ Catalogue partiel ({pages_vues} pages) : suivi limité aux annonces récentes.")
                 
         # --- VISITE DES LIENS ---
         print(f"\nVisite de {len(data_cars)} annonces individuelles pour récupérer les critères...")
@@ -406,6 +408,8 @@ def scrape_tayara():
 
     if echecs_detail:
         print(f"⚠️ {echecs_detail} fiche(s) détail en échec : retentées au prochain run.")
+    enregistrer_liens_vus("tayara", liens_vus, complet=pagination_complete, pages=pages_vues,
+                          nouvelles=len(data_cars) - echecs_detail)
     print(f"\n✅ Terminé : {len(data_cars)} annonces traitées et enregistrées dans {FICHIER_TAYARA}")
 
     # Filet de sécurité : dédoublonnage léger sur 'Lien', au cas où une même

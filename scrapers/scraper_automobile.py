@@ -390,10 +390,11 @@ def scrape_automobile_tn():
             browser.close()
             print("❌ Aucune annonce collectée sur les pages de liste (Cloudflare ou structure changée).")
             sys.exit(1)
-        if fin_naturelle and pages_en_echec == 0:
-            enregistrer_liens_vus("automobile", liens_vus)
-        else:
-            print("⚠️ Catalogue incomplet : liens vus non publiés (pas de fausses disparitions).")
+        complet = fin_naturelle and pages_en_echec == 0
+        enregistrer_liens_vus("automobile", liens_vus, complet=complet, pages=page_num)
+        if not complet:
+            print(f"⚠️ Catalogue partiel ({page_num} pages, {pages_en_echec} en échec) : "
+                  "suivi limité aux annonces récentes.")
 
         # --- Visite de chaque annonce pour extraire les specs détaillées ---
         nb_extraites = 0
@@ -419,6 +420,7 @@ def scrape_automobile_tn():
 
         browser.close()
 
+    enregistrer_liens_vus("automobile", liens_vus, complet=complet, pages=page_num, nouvelles=nb_extraites)
     print(f"✅ Collecte terminée. {len(liens_annonces)} véhicules trouvés, {nb_extraites} fiches extraites et enregistrées dans {FICHIER_AUTOMOBILE}.")
 
     # Filet de sécurité : dédoublonnage léger sur 'Lien', au cas où une même

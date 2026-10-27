@@ -37,16 +37,30 @@ def aujourd_hui() -> str:
     return datetime.now(FUSEAU).strftime("%Y-%m-%d")
 
 
-def enregistrer_liens_vus(source: str, liens_prix: dict[str, object], dossier: Path = DOSSIER_VUS) -> None:
+def enregistrer_liens_vus(
+    source: str,
+    liens_prix: dict[str, object],
+    dossier: Path = DOSSIER_VUS,
+    *,
+    complet: bool = True,
+    nouvelles: int | None = None,
+    pages: int | None = None,
+) -> None:
     """Écrit (atomiquement) les liens vus ce jour par `source`.
 
     ``liens_prix`` : {lien: prix affiché ou None}.
+    ``complet`` : True si la pagination est allée jusqu'au bout du catalogue.
+    Un catalogue partiel (plafond de pages, erreur en cours de route) reste
+    exploitable par le suivi, mais seulement sur la fenêtre de dates couverte.
     """
     dossier.mkdir(parents=True, exist_ok=True)
     payload = {
         "source": source,
         "date": aujourd_hui(),
         "n": len(liens_prix),
+        "complet": bool(complet),
+        "nouvelles": nouvelles,
+        "pages": pages,
         "liens": {str(k): (None if v is None else str(v)) for k, v in liens_prix.items() if k},
     }
     cible = dossier / f"{source}.json"
@@ -60,10 +74,10 @@ def enregistrer_liens_vus(source: str, liens_prix: dict[str, object], dossier: P
         raise
 
 
-def charger_liens_vus(date: str | None = None, dossier: Path = DOSSIER_VUS) -> dict[str, dict[str, str | None]]:
-    """{source: {lien: prix}} pour les fichiers datés de `date` (défaut : aujourd'hui)."""
+def charger_catalogues(date: str | None = None, dossier: Path = DOSSIER_VUS) -> dict[str, dict]:
+    """{source: payload complet} pour les fichiers datés de `date` (défaut : aujourd'hui)."""
     date = date or aujourd_hui()
-    resultat: dict[str, dict[str, str | None]] = {}
+    resultat: dict[str, dict] = {}
     if not dossier.exists():
         return resultat
     for chemin in dossier.glob("*.json"):
@@ -72,5 +86,19 @@ def charger_liens_vus(date: str | None = None, dossier: Path = DOSSIER_VUS) -> d
         except (OSError, ValueError):
             continue
         if data.get("date") == date and isinstance(data.get("liens"), dict):
-            resultat[str(data.get("source") or chemin.stem)] = data["liens"]
+            data.setdefault("complet", True)
+            resultat[str(data.get("source") or chemin.stem)] = data
     return resultat
+
+
+def charger_liens_vus(date: str | None = None, dossier: Path = DOSSIER_VUS) -> dict[str, dict[str, str | None]]:
+    """{source: {lien: prix}} pour les catalogues COMPLETS du jour."""
+    return {k: v["liens"] for k, v in charger_catalogues(date, dossier).items() if v.get("complet")}
+
+
+def resume_catalogues(date: str | None = None, dossier: Path = DOSSIER_VUS) -> dict[str, dict]:
+    """Résumé léger (sans les liens) pour le manifeste du pipeline."""
+    return {
+        k: {"liens_vus": v.get("n"), "complet": v.get("complet"), "nouvelles": v.get("nouvelles"), "pages": v.get("pages")}
+        for k, v in charger_catalogues(date, dossier).items()
+    }

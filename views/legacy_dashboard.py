@@ -2001,9 +2001,10 @@ def page_admin(df, df_deals):
             st.markdown("**Sélection du modèle**")
             stab = diag.get("stabilite_finalistes") or {}
             st.dataframe(pd.DataFrame([
-                {"Finaliste": x["nom"], "Score robuste (%)": x["score_robuste_pct"],
-                 "Stabilité moyenne (%)": (stab.get(x["nom"]) or {}).get("moyenne_pct"),
-                 "± écart-type (pt)": (stab.get(x["nom"]) or {}).get("ecart_type_pct"),
+                {"Finaliste": x["nom"],
+                 "Erreur production (%)": x.get("erreur_production_pct", (stab.get(x["nom"]) or {}).get("moyenne_pct")),
+                 "± bruit (pt)": (stab.get(x["nom"]) or {}).get("ecart_type_pct"),
+                 "Erreur stress-tests (%)": x.get("erreur_stress_pct"),
                  "Retenu": "✅" if x["nom"] == diag["modele_retenu"] else ""}
                 for x in sel["shortlist"]
             ]), width="stretch", hide_index=True)
