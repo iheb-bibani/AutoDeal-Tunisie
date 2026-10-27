@@ -134,21 +134,36 @@ ReDoc :
 http://127.0.0.1:8000/redoc
 ```
 
-### Endpoints initiaux
+### Endpoints
 
-| Méthode | Endpoint | Usage |
-|---|---|---|
-| `GET` | `/health` | santé du service |
-| `GET` | `/api/v1/market/summary` | résumé du marché |
-| `GET` | `/api/v1/listings` | recherche filtrée et paginée |
-| `GET` | `/api/v1/deals` | opportunités détectées |
-| `POST` | `/api/v1/valuation/comparables` | valorisation indépendante par comparables |
+| Méthode | Endpoint | Usage | Clé API* |
+|---|---|---|---|
+| `GET` | `/health` | santé du service | — |
+| `GET` | `/api/v1/market/summary` | résumé du marché | — |
+| `GET` | `/api/v1/listings` | recherche filtrée et paginée | si tri par opportunité |
+| `GET` | `/api/v1/deals` | opportunités détectées (radar) | oui |
+| `POST` | `/api/v1/valuation/comparables` | valorisation indépendante par comparables | — |
+| `POST` | `/api/v1/valuation/estimate` | estimation ML + fourchette calibrée à 80 % + contrôle par comparables | — |
 
-Exemple :
+\* Seulement si `AUTODEAL_API_KEY` est défini (en-tête `X-API-Key`). Sans variable, l'API reste ouverte (développement).
+
+Exemples :
 
 ```bash
-curl "http://127.0.0.1:8000/api/v1/listings?brand=Peugeot&model=208&max_price=50000&limit=20"
+curl "http://127.0.0.1:8000/api/v1/listings?brand=Peugeot&model=208&max_price=50000&sort=price_asc&limit=20"
+
+curl -X POST http://127.0.0.1:8000/api/v1/valuation/estimate \
+  -H "Content-Type: application/json" \
+  -d '{"brand":"Peugeot","model":"208","year":2020,"mileage_km":70000,"fuel":"Essence","gearbox":"Manuelle"}'
 ```
+
+| Variable | Rôle | Défaut |
+|---|---|---|
+| `AUTODEAL_API_KEY` | protège le radar de deals | (ouverte) |
+| `AUTODEAL_RATE_LIMIT_PER_MIN` | requêtes `/api/*` par IP et par minute (0 = illimité) | `120` |
+| `AUTODEAL_CORS_ORIGINS` | origines autorisées | localhost:8501 |
+
+Image Docker de l'API (dépendances minimales, utilisateur non root) : `make docker` puis `docker run -p 8000:8000 -e AUTODEAL_API_KEY=... autodeal-api`.
 
 La première version de l'API est volontairement **read-only**. Les opérations sensibles liées aux comptes, abonnements et paiements restent protégées par Supabase/RLS jusqu'à l'introduction d'endpoints authentifiés dédiés.
 
@@ -239,6 +254,13 @@ core/suivi_annonces.py
 
 `main.py` orchestre le pipeline. GitHub Actions ajoute le quality gate, le suivi de performance, les notifications et la publication des données validées.
 
+Points clés du traitement :
+
+- **Catalogue du jour** : chaque scraper publie les liens réellement vus sur ses pages de liste (`data/raw/vus/`, résumé dans `pipeline_run.json`), marqués complets ou partiels. Les CSV bruts étant cumulatifs, c'est la seule source fiable pour savoir ce qui est encore en ligne.
+- **Prix actuel** : le prix affiché aujourd'hui (ou le dernier prix du suivi) remplace le premier prix figé dans les CSV bruts ; `Prix_Initial`, `Variation_Prix_Pct` et `Baisse_Prix` sont conservés.
+- **Republications** : une même voiture republiée ou recopiée sur un autre site ne compte qu'une fois (clé marque/modèle/année/km/prix/énergie/boîte) ; `Nb_Publications` est gardé comme signal de négociation. Les annonces tayara sont identifiées par leur ID, indépendamment de la ville dans l'URL.
+- **Dates** : toutes les dates métier sont à l'heure de Tunis (`core/dates.py`).
+
 ### Modèle de prix
 
 La cible est `log1p(Prix)`. Les prix publiés dans le jeu scoré sont calculés **out-of-fold** : une annonce n'est jamais évaluée par un modèle qui l'a utilisée pour son entraînement.
@@ -284,7 +306,15 @@ aléatoire, étaient optimistes d'environ 1,5 point à cause de ces doublons.
 
 **9,3 % de MdAPE ne signifie pas 90,7 % de précision.** Il s'agit de l'erreur absolue relative médiane dans ce protocole.
 
-**Sélection du modèle.** Les deux meilleurs candidats en CV sont départagés par un score robuste : stabilité (5 CV groupées + 3 holdouts temporels), GroupKFold marque-modèle et source-holdouts **pondérés par volume**. Si l'écart est inférieur au bruit mesuré, le modèle le plus stable l'emporte. Sur ce run, XGBoost n'a un score robuste meilleur que de 0,2 pt (bruit 0,4 pt) alors que HistGradientBoosting est meilleur et plus stable en validation répétée (9,42 % ± 0,22 contre 9,86 % ± 0,40) : HistGradientBoosting est retenu.
+**Sélection du modèle** (`choisir_modele`). Les deux meilleurs candidats en CV sont départagés ainsi :
+
+1. critère principal : **erreur de production** = moyenne de 5 CV groupées (seeds différentes) + 3 holdouts temporels — c'est le scénario réel (nouvelles annonces de marques et de sources connues) ;
+2. garde-fou : un candidat est écarté si son **erreur aux stress-tests** (marques-modèles jamais vus + sources exclues, moyenne pondérée par volume) dépasse celle du meilleur de plus de 15 % ;
+3. quasi ex-aequo en production (écart < bruit mesuré) : le meilleur aux stress-tests l'emporte.
+
+L'ancienne règle donnait deux tiers du poids aux stress-tests et faisait alterner HistGradientBoosting et XGBoost d'une nuit à l'autre.
+
+**Fourchettes de prix calibrées** (`core/intervalles.py`). Les fourchettes affichées sont des intervalles à 80 % appris sur les erreurs hors échantillon du modèle, par tranche de prix (plus larges en haut de gamme). Leur couverture réelle est mesurée sur les annonces les plus récentes et publiée dans `diagnostics_modele.json` (≈ 83 % pour 80 % visés au 27/10/2026). L'ancienne fourchette « ± erreur médiane » ne contenait le vrai prix qu'environ une fois sur deux.
 
 Le source-holdout d'`autocentral.tn (facebook)` reste très difficile (~52 %) : la source est en quarantaine pour les alertes automatiques.
 
@@ -328,7 +358,9 @@ Cela permet de confronter **ML Valuation** et **Market Comparable Valuation** sa
 
 `core/suivi_performance.py` enregistre dans le temps : MdAPE, MdAE, MAE, P90, couverture à ±5/10/15 %, biais, volume, mix des sources et drift.
 
-`core/suivi_annonces.py` suit première/dernière observation, prix initial/dernier prix, disparition, réapparition et durée observée. Les disparitions sont protégées contre les scrapings incomplets **globalement et par source**.
+`core/suivi_annonces.py` suit première/dernière observation, prix initial/dernier prix, disparition, réapparition et durée observée, à partir du **catalogue du jour** de chaque scraper. Un catalogue partiel (plafond de pages) n'est exploité que sur la fenêtre de dates qu'il couvre. Les disparitions sont protégées contre les scrapings incomplets **globalement et par source**.
+
+Le volume par source contrôlé par le quality gate est celui vu **le jour même** (et non la taille du CSV cumulatif).
 
 ---
 
@@ -350,7 +382,15 @@ subscription_notifications
 
 Les politiques RLS isolent les données utilisateur. Les clés `service-role` / secret restent réservées au backend et aux workflows serveur.
 
-Pour un nouveau projet, exécuter `supabase/schema.sql`, puis configurer les secrets décrits dans [`SUPABASE_SETUP.md`](SUPABASE_SETUP.md).
+Pour un nouveau projet, exécuter `supabase/schema.sql` (ou les fichiers de `supabase/migrations/` dans l'ordre), puis configurer les secrets décrits dans [`SUPABASE_SETUP.md`](SUPABASE_SETUP.md). Pour un projet existant, appliquer la migration `20261027000000_trial_once_per_email.sql`.
+
+Règles notables :
+
+- l'essai gratuit Pro/Business est accordé à la **confirmation de l'e-mail**, une seule fois par adresse (Gmail : points et « +étiquette » ignorés) ;
+- un abonnement résilié garde l'accès jusqu'à la fin de la période payée ;
+- le webhook Konnect est idempotent et vérifie wallet, montant et devise.
+
+Le workflow **Supabase SQL** rejoue schéma et migrations sur Postgres 16 et vérifie ces règles à chaque modification.
 
 ---
 
@@ -426,7 +466,8 @@ python verifier_sync.py
 ## Tests et CI
 
 ```bash
-python -m pytest tests/ -q
+make test     # ou : python -m pytest -q
+make lint     # ruff, mêmes règles bloquantes que la CI
 ```
 
 La suite couvre notamment :
@@ -439,9 +480,12 @@ La suite couvre notamment :
 - quality gate ;
 - fiabilité ML ;
 - registre des URLs frontend ;
-- endpoints FastAPI.
+- endpoints FastAPI (estimation, clé API, limitation de débit) ;
+- fourchettes calibrées, prix actuel, republications, sélection du modèle ;
+- parsing des prix scrapés ;
+- affichage sans erreur de chaque page Streamlit.
 
-La CI compile également les modules Python et exécute les contrôles de cohérence du dépôt.
+La CI compile les modules, lance pytest et ruff (bloquant) et les contrôles de cohérence du dépôt ; le workflow Supabase SQL teste le schéma sur un vrai Postgres. Dependabot propose les mises à jour (hors bibliothèques du modèle, verrouillées sur le pickle).
 
 ---
 
