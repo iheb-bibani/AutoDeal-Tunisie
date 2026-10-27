@@ -41,7 +41,7 @@ patchright>=1.45
 pytest
 
 # Backend persistant / Auth
-supabase>=2.18,<3
+supabase>=2.33.0,<3
 
 # Benchmark / modèle de prix
 catboost==1.2.10
