@@ -112,7 +112,7 @@ def lire_json_distant(chemin):
         return None
 
 MARQUES_LUXE = ["Porsche", "Land Rover", "Mercedes-Benz", "Jaguar", "Audi", "Bmw", "Tesla"]
-GRAND_TUNIS = ["Tunis", "Ariana", "Ben Arous", "Manouba"]
+GRAND_TUNIS = ["Tunis", "Ariana", "Ben Arous", "Manouba", "La Manouba"]
 K_LISSAGE = 15
 
 # ---------------------------------------------------------------------------
@@ -1961,7 +1961,10 @@ def page_admin(df, df_deals):
         c1.metric("Modèle retenu", diag["modele_retenu"].split(" (")[0])
         c2.metric("Annonces d'entraînement", f"{diag['n_annonces']:,}".replace(",", " "))
         c3.metric("Fenêtre de fraîcheur", f"{diag['fenetre_jours']} j")
-        c4.metric("Validation croisée", f"{diag['n_folds']} folds")
+        groupee = "n_vehicules_distincts" in diag
+        c4.metric("Validation croisée", f"{diag['n_folds']} folds" + (" groupés" if groupee else ""),
+                  help="Folds groupés par véhicule : une même voiture publiée sur plusieurs sites "
+                       "reste dans un seul fold (pas de fuite)." if groupee else None)
 
         cand = pd.DataFrame(diag["candidats"]).sort_values("mdape_pct")
         cand["retenu"] = cand["nom"] == diag["modele_retenu"]
@@ -1992,6 +1995,20 @@ def page_admin(df, df_deals):
                    "La sélection se fait sur l'erreur relative médiane : `Score_Opportunite` "
                    "étant un écart relatif, la métrique de sélection doit l'être aussi. "
                    "Le MAE est affiché pour information — il est dominé par le haut de gamme.")
+
+        sel = diag.get("selection_robuste") or {}
+        if sel.get("shortlist"):
+            st.markdown("**Sélection du modèle**")
+            stab = diag.get("stabilite_finalistes") or {}
+            st.dataframe(pd.DataFrame([
+                {"Finaliste": x["nom"], "Score robuste (%)": x["score_robuste_pct"],
+                 "Stabilité moyenne (%)": (stab.get(x["nom"]) or {}).get("moyenne_pct"),
+                 "± écart-type (pt)": (stab.get(x["nom"]) or {}).get("ecart_type_pct"),
+                 "Retenu": "✅" if x["nom"] == diag["modele_retenu"] else ""}
+                for x in sel["shortlist"]
+            ]), width="stretch", hide_index=True)
+            if sel.get("raison"):
+                st.caption(f"Choix : {sel['raison']}. Règle : {sel.get('regle', '')}.")
 
         robuste = diag.get("validation_robuste", {})
         if robuste:
@@ -2706,7 +2723,9 @@ def page_carte(df):
     couleur = "prix_median" if metrique.startswith("Prix") else "taux_deals"
     labels = {"prix_median": "Prix médian (DT)", "taux_deals": "% d'opportunités",
               "n": "Annonces", "_gouv": "Gouvernorat"}
-    fig = px.scatter_mapbox(
+    # scatter_map (MapLibre) : scatter_mapbox a été retiré de plotly 7, ce qui
+    # cassait la page Carte avec plotly>=7 (version installée par défaut).
+    fig = px.scatter_map(
         agg, lat="lat", lon="lon", size="n", color=couleur,
         hover_name="_gouv",
         hover_data={"n": True, "prix_median": ":,.0f", "taux_deals": True,
@@ -2714,7 +2733,7 @@ def page_carte(df):
         color_continuous_scale="Turbo", size_max=45, zoom=5.1,
         center={"lat": 34.5, "lon": 9.6}, labels=labels, height=560,
     )
-    fig.update_layout(mapbox_style="open-street-map",
+    fig.update_layout(map_style="open-street-map",
                       margin={"l": 0, "r": 0, "t": 10, "b": 0})
     st.plotly_chart(fig, width="stretch")
 
@@ -2790,7 +2809,7 @@ def page_assistant(df, bundle):
             "Kilométrage": km or 100000, "Age_Vehicule": max(pd.Timestamp.now().year - annee, 0),
             "Puissance_Fiscale": sous["Puissance_Fiscale"].median() if "Puissance_Fiscale" in sous else 6,
             "Segment_Vehicule": int(sous["Segment_Vehicule"].median()) if "Segment_Vehicule" in sous else 0,
-            "Zone_Economique": 1 if gouv in ("Tunis", "Ariana", "Ben Arous", "Manouba") else 0,
+            "Zone_Economique": 1 if gouv in GRAND_TUNIS else 0,
             "Cylindree": sous["Cylindree"].median() if "Cylindree" in sous else np.nan,
             "Marque": marque, "Modèle": modele or "Autre",
             "Energie": (sous["Energie"].mode().iloc[0] if sous["Energie"].notna().any() else "Essence"),

@@ -271,20 +271,22 @@ Boite_Vitesse
 
 ### Dernier diagnostic versionné
 
-Run du 26 octobre 2026 (3 514 annonces, 3 047 véhicules distincts), validation
+Run du 27 octobre 2026 (3 469 annonces, 3 009 véhicules distincts), validation
 croisée **groupée par véhicule** : une même voiture publiée sur deux sites (ou
 republiée) reste dans un seul fold. Les chiffres antérieurs, calculés en KFold
-aléatoire, étaient optimistes d'environ 1,5 à 2 points à cause de ces doublons.
+aléatoire, étaient optimistes d'environ 1,5 point à cause de ces doublons.
 
 | Test | MdAPE |
 |---|---:|
-| CV out-of-fold groupée (XGBoost retenu) | **9,87 %** |
-| Holdout temporel ~20 % (coupé sur une date, doublons retirés) | **9,48 %** |
-| GroupKFold marque-modèle (stress-test) | **15,91 %** |
+| CV out-of-fold groupée (HistGradientBoosting retenu) | **9,34 %** |
+| Holdout temporel ~20 % (coupé sur une date, doublons retirés) | **9,69 %** |
+| GroupKFold marque-modèle (stress-test) | **15,82 %** |
 
-**9,9 % de MdAPE ne signifie pas 90,1 % de précision.** Il s'agit de l'erreur absolue relative médiane dans ce protocole.
+**9,3 % de MdAPE ne signifie pas 90,7 % de précision.** Il s'agit de l'erreur absolue relative médiane dans ce protocole.
 
-Le source-holdout d'`autocentral.tn (facebook)` reste très difficile (~50 %) : la source est en quarantaine pour les alertes automatiques. Les sources dépassant le seuil de fiabilité défini sont conservées pour l'observation mais bloquées des alertes automatiques.
+**Sélection du modèle.** Les deux meilleurs candidats en CV sont départagés par un score robuste : stabilité (5 CV groupées + 3 holdouts temporels), GroupKFold marque-modèle et source-holdouts **pondérés par volume**. Si l'écart est inférieur au bruit mesuré, le modèle le plus stable l'emporte. Sur ce run, XGBoost n'a un score robuste meilleur que de 0,2 pt (bruit 0,4 pt) alors que HistGradientBoosting est meilleur et plus stable en validation répétée (9,42 % ± 0,22 contre 9,86 % ± 0,40) : HistGradientBoosting est retenu.
+
+Le source-holdout d'`autocentral.tn (facebook)` reste très difficile (~52 %) : la source est en quarantaine pour les alertes automatiques.
 
 ---
 

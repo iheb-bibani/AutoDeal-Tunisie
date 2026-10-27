@@ -86,3 +86,26 @@ def test_ecriture_atomique_ne_laisse_pas_de_fichier_partiel(tmp_path):
         ecrire_csv_atomique(Boom({"a": [2]}), cible)
     assert pd.read_csv(cible, sep=";", encoding="utf-8-sig")["a"].tolist() == [1]
     assert [p.name for p in tmp_path.iterdir()] == ["f.csv"]
+
+
+def test_selection_quasi_ex_aequo_departagee_par_la_stabilite():
+    from core.modele_prediction import choisir_modele
+
+    stab = {"HGB": {"moyenne_pct": 9.4, "ecart_type_pct": 0.2}, "XGB": {"moyenne_pct": 9.9, "ecart_type_pct": 0.4}}
+    # XGB a un score robuste à peine meilleur, sous le bruit (0,4 pt) : HGB l'emporte.
+    gagnant, raison = choisir_modele({"HGB": 0.1343, "XGB": 0.1323}, stab)
+    assert gagnant == "HGB" and "ex-aequo" in raison
+    # Écart net (> bruit) : le meilleur score robuste l'emporte.
+    gagnant, _ = choisir_modele({"HGB": 0.150, "XGB": 0.130}, stab)
+    assert gagnant == "XGB"
+
+
+def test_score_robuste_pondere_les_sources_par_volume():
+    from core.modele_prediction import score_robuste
+
+    gen = {"groupkfold_marque_modele": {"mdape": 0.16},
+           "source_holdout": [{"source": "petite", "n_test": 100, "mdape": 0.50},
+                              {"source": "grande", "n_test": 900, "mdape": 0.10}]}
+    s = score_robuste(gen, {"moyenne_pct": 10.0})
+    # sources : 0,5*0,1 + 0,1*0,9 = 0,14 (et non 0,30 en moyenne simple)
+    assert abs(s - (0.10 + 0.16 + 0.14) / 3) < 1e-9

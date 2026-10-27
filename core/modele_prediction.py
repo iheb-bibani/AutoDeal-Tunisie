@@ -406,6 +406,51 @@ def diagnostic_stabilite(df, X, y, pipelines, seeds=(7, 21, 42, 84, 123), groups
         }
     return out
 
+def score_robuste(generalisation: dict, stabilite: dict) -> float:
+    """Erreur « robuste » d'un finaliste (plus bas = meilleur).
+
+    Moyenne de trois familles de tests, à poids égal :
+    - stabilité : 5 CV groupées (seeds) + 3 holdouts temporels ;
+    - GroupKFold marque-modèle (familles jamais vues) ;
+    - leave-one-source-out, moyenne PONDÉRÉE par le nombre d'annonces testées.
+
+    Avant : la CV et le holdout temporel n'étaient comptés qu'une fois chacun,
+    et la moyenne des sources n'était pas pondérée — la petite source
+    autocentral (bruitée, déjà en quarantaine) pesait autant que tayara ou
+    automobile.tn et décidait seule du modèle retenu.
+    """
+    valeurs = [stabilite["moyenne_pct"] / 100]
+    if generalisation.get("groupkfold_marque_modele"):
+        valeurs.append(generalisation["groupkfold_marque_modele"]["mdape"])
+    src = generalisation.get("source_holdout") or []
+    poids = [max(int(x.get("n_test") or 0), 0) for x in src]
+    if src and sum(poids):
+        valeurs.append(float(np.average([x["mdape"] for x in src], weights=poids)))
+    return float(np.mean(valeurs))
+
+
+def choisir_modele(scores: dict[str, float], stabilite: dict[str, dict]) -> tuple[str, str]:
+    """Retient le meilleur score robuste, sauf quasi ex-aequo.
+
+    Si l'écart de score robuste est inférieur au bruit mesuré (écart-type de
+    stabilité du finaliste le plus instable), la différence n'est pas
+    significative : on retient le modèle le plus précis ET stable en
+    validation répétée (moyenne de stabilité la plus basse).
+    """
+    tries = sorted(scores, key=scores.get)
+    if len(tries) == 1:
+        return tries[0], "seul candidat"
+    a, b = tries[0], tries[1]
+    bruit = max(stabilite[a]["ecart_type_pct"], stabilite[b]["ecart_type_pct"]) / 100
+    if scores[b] - scores[a] < bruit:
+        gagnant = min((a, b), key=lambda k: stabilite[k]["moyenne_pct"])
+        return gagnant, (
+            f"quasi ex-aequo (écart {abs(scores[b] - scores[a]):.2%} < bruit {bruit:.2%}) : "
+            f"meilleure stabilité ({stabilite[gagnant]['moyenne_pct']:.2f} %)"
+        )
+    return a, f"meilleur score robuste ({scores[a]:.2%} vs {scores[b]:.2%})"
+
+
 def diagnostic_boite(df, candidats_noms, n_splits=5, groups=None):
     """Mesure l'apport de Boite_Vitesse sans la confondre avec la transmission aux roues."""
     if "Boite_Vitesse" not in df.columns: return {}
@@ -456,21 +501,11 @@ def main():
     # MdAPE s'il généralise moins bien dans le temps ou entre sources.
     shortlist = sorted(resultats, key=lambda k: resultats[k]["mdape"])[:2]
     robustes = {}
-    scores_robustes = {}
     print("\nDiagnostics de généralisation des 2 meilleurs candidats...")
     for nom in shortlist:
-        d = diagnostics_generalisation(df, X, y, resultats[nom]["pipeline"], n_splits=n_splits, doublons=groupes)
-        robustes[nom] = d
-        valeurs = [resultats[nom]["mdape"]]
-        if d.get("groupkfold_marque_modele"):
-            valeurs.append(d["groupkfold_marque_modele"]["mdape"])
-        if d.get("time_holdout_20pct"):
-            valeurs.append(d["time_holdout_20pct"]["mdape"])
-        src = [x["mdape"] for x in d.get("source_holdout", [])]
-        if src:
-            valeurs.append(float(np.mean(src)))
-        scores_robustes[nom] = float(np.mean(valeurs))
-        print(f"  {nom:22s} score robuste={scores_robustes[nom]:.2%}")
+        robustes[nom] = diagnostics_generalisation(
+            df, X, y, resultats[nom]["pipeline"], n_splits=n_splits, doublons=groupes
+        )
 
     stabilite = diagnostic_stabilite(df, X, y, {nom: resultats[nom]["pipeline"] for nom in shortlist}, groups=groupes)
     print("\nStabilité des finalistes (seeds + holdouts temporels) :")
@@ -478,7 +513,11 @@ def main():
         print(f"  {nom:22s} moyenne={st['moyenne_pct']:.2f}% ± {st['ecart_type_pct']:.2f} pt "
               f"[{st['min_pct']:.2f}; {st['max_pct']:.2f}]")
 
-    meilleur_nom = min(shortlist, key=lambda k: scores_robustes[k])
+    scores_robustes = {nom: score_robuste(robustes[nom], stabilite[nom]) for nom in shortlist}
+    for nom in shortlist:
+        print(f"  {nom:22s} score robuste={scores_robustes[nom]:.2%}")
+    meilleur_nom, raison_choix = choisir_modele(scores_robustes, stabilite)
+    print(f"  Choix : {raison_choix}")
     meilleur_pipeline = resultats[meilleur_nom]["pipeline"]
     erreur_relative_typique = resultats[meilleur_nom]["mdape"]
     generalisation = robustes[meilleur_nom]
@@ -504,9 +543,12 @@ def main():
                 {"nom": nom, "score_robuste_pct": round(scores_robustes[nom] * 100, 2)}
                 for nom in shortlist
             ],
-            "regle": "moyenne KFold + GroupKFold + holdout temporel + moyenne source-holdouts",
+            "regle": "moyenne : stabilité (5 CV groupées + 3 holdouts temporels) + GroupKFold marque-modèle "
+                     "+ source-holdouts pondérés par volume ; quasi ex-aequo départagé par la stabilité",
+            "raison": raison_choix,
         },
         "validation_robuste": generalisation,
+        "validation_finalistes": robustes,
         "stabilite_finalistes": stabilite,
         "diagnostic_boite_vitesses": diagnostic_boite(df, shortlist, n_splits, groups=groupes),
         "diagnostic_zone_economique": zone,
