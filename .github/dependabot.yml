@@ -1,0 +1,24 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    ignore:
+      # Le modèle versionné (data/models/modele_prix.pkl) est sérialisé avec ces
+      # versions exactes : les changer impose de réentraîner (voir requirements.txt).
+      - dependency-name: scikit-learn
+      - dependency-name: numpy
+      - dependency-name: joblib
+      - dependency-name: xgboost
+      - dependency-name: lightgbm
+      - dependency-name: catboost

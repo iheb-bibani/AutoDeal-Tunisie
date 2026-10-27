@@ -22,6 +22,7 @@ from core.dates import aujourd_hui as date_du_jour  # noqa: E402
 import pandas as pd
 
 from config import PROCESSED_FILES
+from core.doublons import lien_canonique
 from core.io_atomique import ecrire_csv_atomique
 from scrapers.liens_vus import SOURCE_LABELS, charger_catalogues
 from scrapers.parsing import parser_prix_tnd
@@ -240,7 +241,15 @@ def mettre_a_jour_depuis_observations(suivi, merged, connus, aujourd_hui, liens_
     if len(suivi):
         source_suivi = suivi["Source"] if "Source" in suivi.columns else pd.Series(pd.NA, index=suivi.index)
         observee = _source_observee(source_suivi, labels)
-        vue = suivi["Lien"].astype(str).isin(liens_vus)
+        # Comparaison sur le lien canonique (tayara : identifiant d'annonce,
+        # indépendant de la ville présente dans l'URL).
+        canon_suivi = lien_canonique(suivi["Lien"])
+        canon_vus = set(lien_canonique(pd.Series(sorted(liens_vus), dtype=str))) if liens_vus else set()
+        vue = canon_suivi.isin(canon_vus)
+        prix_vus_canon = {}
+        if prix_vus:
+            cles = pd.Series(list(prix_vus.keys()), dtype=str)
+            prix_vus_canon = dict(zip(lien_canonique(cles), prix_vus.values(), strict=True))
 
         # Catalogues partiels : seulement la fenêtre de dates réellement couverte.
         depot_suivi = suivi["Lien"].astype(str).map(depot_merged)
@@ -268,7 +277,7 @@ def mettre_a_jour_depuis_observations(suivi, merged, connus, aujourd_hui, liens_
 
         suivi.loc[vue, "Derniere_Vue"] = aujourd_hui
         liens = suivi.loc[vue, "Lien"].astype(str)
-        nouveau_prix = liens.map(prix_vus).fillna(liens.map(prix_merged))
+        nouveau_prix = canon_suivi[vue].map(prix_vus_canon).fillna(liens.map(prix_merged))
         suivi.loc[vue, "Prix_Dernier"] = nouveau_prix.where(nouveau_prix.notna(), suivi.loc[vue, "Prix_Dernier"]).values
 
         revenues = vue & (suivi["Statut"] == "Disparue")

@@ -129,3 +129,15 @@ def test_erreur_stress_pondere_les_sources_par_volume():
     gen = _gen(0.16, [("petite", 100, 0.50), ("grande", 900, 0.10)])
     # sources : 0,5*0,1 + 0,1*0,9 = 0,14 (et non 0,30 en moyenne simple)
     assert abs(erreur_stress(gen) - (0.16 + 0.14) / 2) < 1e-9
+
+
+def test_lien_canonique_tayara_ignore_la_ville():
+    from core.doublons import lien_canonique
+
+    liens = pd.Series([
+        "https://www.tayara.tn/item/voitures/ariana/la-soukra/peugeot-208/6aaed51326fc672960d7947d/",
+        "https://www.tayara.tn/item/voitures/tunis/l-aouina/peugeot-208/6aaed51326fc672960d7947d/",
+        "https://www.automobile.tn/fr/occasion/peugeot/208/130657",
+    ])
+    c = lien_canonique(liens)
+    assert c.iloc[0] == c.iloc[1] != c.iloc[2]

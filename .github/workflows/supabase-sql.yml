@@ -1,0 +1,50 @@
+name: Supabase SQL
+
+# Rejoue le schéma et les migrations sur un vrai Postgres 16, puis vérifie les
+# règles métier codées en SQL (essai gratuit, rôles).
+on:
+  push:
+    branches: [main]
+    paths: ['supabase/**', 'tests/sql/**', '.github/workflows/supabase-sql.yml']
+  pull_request:
+    paths: ['supabase/**', 'tests/sql/**', '.github/workflows/supabase-sql.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Migrations dans l'ordre (installation neuve)
+        run: |
+          createdb migrations
+          psql -v ON_ERROR_STOP=1 -q -d migrations -f tests/sql/00_fake_supabase_auth.sql
+          for f in supabase/migrations/*.sql; do
+            echo "-> $f"; psql -v ON_ERROR_STOP=1 -q -d migrations -f "$f"
+          done
+          psql -v ON_ERROR_STOP=1 -q -d migrations -f tests/sql/10_trial_once_per_email.sql
+
+      - name: schema.sql (installation en un fichier, rejouée deux fois)
+        run: |
+          createdb schema
+          psql -v ON_ERROR_STOP=1 -q -d schema -f tests/sql/00_fake_supabase_auth.sql
+          psql -v ON_ERROR_STOP=1 -q -d schema -f supabase/schema.sql
+          psql -v ON_ERROR_STOP=1 -q -d schema -f supabase/schema.sql
+          psql -v ON_ERROR_STOP=1 -q -d schema -f tests/sql/10_trial_once_per_email.sql

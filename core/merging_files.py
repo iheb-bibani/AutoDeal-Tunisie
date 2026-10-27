@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import pandas as pd
 from logger import get_logger
 from config import PROCESSED_FILES, SCRAPERS, CORRECTIONS_MARQUE
+from core.doublons import lien_canonique
 from core.regles_texte import MARQUES_VALIDES, masque_bruit
 from utils.common import charger_dataframe_securise, sauvegarder_dataframe
 
@@ -141,7 +142,13 @@ def fusionner_sources():
         df_final = df_final.assign(
             _date=pd.to_datetime(df_final["Annonce-Detectee"], errors="coerce")
         ).sort_values("_date", kind="stable", na_position="first").drop(columns="_date")
-    df_final = df_final.drop_duplicates(subset=["Lien"], keep="last")
+    # Lien canonique : une annonce tayara garde son identifiant même si la
+    # ville (présente dans l'URL) change.
+    df_final = (
+        df_final.assign(_lien=lien_canonique(df_final["Lien"]))
+        .drop_duplicates(subset=["_lien"], keep="last")
+        .drop(columns="_lien")
+    )
     nb_doublons = avant_dedup - len(df_final)
     if nb_doublons:
         logger.info(f"🧹 {nb_doublons} doublons (même Lien) supprimés")

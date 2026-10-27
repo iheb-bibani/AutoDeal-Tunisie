@@ -91,3 +91,23 @@ def test_features_config_coherentes_avec_le_modele_sauvegarde():
     bundle = joblib.load(MODEL_PATH)
     assert bundle["features_numeriques"] == config.FEATURES_NUMERIQUES
     assert bundle["features_categorielles"] == config.FEATURES_CATEGORIELLES
+
+
+def test_versions_du_modele_identiques_entre_requirements():
+    """L'image API doit charger le pickle avec les mêmes versions que l'entraînement."""
+    from pathlib import Path
+
+    racine = Path(__file__).resolve().parents[1]
+
+    def pins(nom):
+        out = {}
+        for ligne in (racine / nom).read_text().splitlines():
+            ligne = ligne.split("#")[0].strip()
+            if "==" in ligne:
+                pkg, version = ligne.split("==")
+                out[pkg.strip().lower()] = version.strip()
+        return out
+
+    complet, api = pins("requirements.txt"), pins("requirements-api.txt")
+    for pkg in ["scikit-learn", "numpy", "joblib", "xgboost", "lightgbm", "catboost"]:
+        assert api.get(pkg) == complet.get(pkg), pkg

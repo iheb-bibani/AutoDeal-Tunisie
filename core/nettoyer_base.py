@@ -29,6 +29,7 @@ from core.dates import aujourd_hui_ts, annee_courante  # noqa: E402
 import pandas as pd
 
 from core.io_atomique import ecrire_csv_atomique
+from core.doublons import cle_republication
 from core.prix_actuel import appliquer_prix_actuel
 from core.regles_texte import masque_bruit, masques_accident
 from config import (
@@ -402,6 +403,21 @@ def process_data():
     df["Date_Reference_Annonce"] = df["Annonce-Deposee"].fillna(detectee)
     aujourd_hui = aujourd_hui_ts()
     df["Age_Annonce_Jours"] = (aujourd_hui - df["Date_Reference_Annonce"]).dt.days.clip(lower=0)
+
+    # -- Republications : un vendeur qui republie la même voiture (nouveau
+    # lien, mêmes marque/modèle/année/km/prix), ou la recopie sur un autre
+    # site, ne doit compter qu'une fois (entraînement, comparables, deals).
+    # On garde la publication la plus récente et le nombre de publications,
+    # signal de négociation utile (vendeur qui peine à vendre).
+    df = df.assign(_cle=cle_republication(df), _det=pd.to_datetime(df.get("Annonce-Detectee"), errors="coerce"))
+    df["Nb_Publications"] = df.groupby("_cle")["_cle"].transform("size")
+    df["Premiere_Publication"] = df.groupby("_cle")["Date_Reference_Annonce"].transform("min")
+    avant = len(df)
+    df = (df.sort_values("_det", kind="stable", na_position="first")
+            .drop_duplicates("_cle", keep="last")
+            .drop(columns=["_cle", "_det"]))
+    if avant != len(df):
+        print(f"🔁 {avant - len(df)} republication(s) / copie(s) inter-sites fusionnée(s).")
 
     # -- Fraîcheur : base "recent" limitée à MAX_DAYS_OLD jours
     df_recent = df[df["Age_Annonce_Jours"] <= MAX_DAYS_OLD].copy()

@@ -1,0 +1,14 @@
+# Dépendances minimales de l'API FastAPI (image Docker).
+# Les versions des bibliothèques du modèle DOIVENT rester identiques à
+# requirements.txt (le pickle versionné en dépend) : vérifié par
+# tests/test_config_source_unique.py.
+scikit-learn==1.8.0
+numpy==2.3.5
+joblib==1.5.3
+xgboost==3.1.3
+lightgbm==4.6.0
+catboost==1.2.10
+pandas>=2.2
+python-dotenv>=1.0
+fastapi>=0.115,<1
+uvicorn[standard]>=0.32,<1

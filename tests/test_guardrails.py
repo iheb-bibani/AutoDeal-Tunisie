@@ -36,7 +36,7 @@ def _ligne(lien, titre="Peugeot 208", marque="Peugeot", modele="208",
 def resultat(tmp_path, monkeypatch):
     """Construit un CSV merged de test, lance process_data, renvoie le CSV recent."""
     lignes = [
-        _ligne("L_valide"),                                  # doit rester, propre
+        _ligne("L_valide", prix=25500),                      # doit rester, propre
         _ligne("L_prix_bas", prix=1000),                     # prix < 3000 -> écarté
         _ligne("L_prix_haut", prix=600000),                  # prix > 500000 -> écarté
         _ligne("L_prix_repete", prix=111111),                # chiffre répété -> écarté
@@ -87,3 +87,24 @@ def test_bruit_immobilier_ecarté(resultat):
 def test_annonce_sans_marque_ecartée(resultat):
     # "Autres" -> NA, aucune marque inférable depuis "voiture propre à vendre"
     assert "L_sans_marque" not in resultat.index
+
+
+def test_republications_fusionnees_et_comptees(tmp_path, monkeypatch):
+    lignes = [
+        _ligne("L_v1", prix=36500, km=80000),
+        _ligne("L_v2", prix=36500, km=80000),                 # republication
+        _ligne("L_v3", prix=36500, km=80000),                 # republication
+        _ligne("L_autre", prix=36500, km=81000),              # autre voiture
+        _ligne("L_sans_km_a", prix=30000, km=None),           # km inconnu : jamais fusionnée
+        _ligne("L_sans_km_b", prix=30000, km=None),
+    ]
+    merged, recent = tmp_path / "merged.csv", tmp_path / "recent.csv"
+    pd.DataFrame(lignes)[COLONNES].to_csv(merged, sep=";", index=False, encoding="utf-8-sig")
+    monkeypatch.setitem(nb.PROCESSED_FILES, "merged", str(merged))
+    monkeypatch.setitem(nb.PROCESSED_FILES, "recent", str(recent))
+    nb.process_data()
+    res = pd.read_csv(recent, sep=";", encoding="utf-8-sig").set_index("Lien")
+    assert len(res) == 4
+    publiee_3_fois = res[res["Kilométrage"] == 80000]
+    assert len(publiee_3_fois) == 1 and publiee_3_fois["Nb_Publications"].iloc[0] == 3
+    assert {"L_sans_km_a", "L_sans_km_b", "L_autre"} <= set(res.index)

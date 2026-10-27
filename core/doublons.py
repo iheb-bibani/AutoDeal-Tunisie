@@ -44,3 +44,33 @@ def cle_doublon(df: pd.DataFrame, colonnes=COLONNES_CLE) -> pd.Series:
         if c in df.columns:
             info_faible &= pd.to_numeric(df[c], errors="coerce").isna()
     return cle.where(~info_faible, "idx:" + df.index.astype(str))
+
+
+_ID_TAYARA = r"tayara\.tn/item/.*?([0-9a-f]{24})/?$"
+
+
+def lien_canonique(liens: pd.Series) -> pd.Series:
+    """Identifiant stable d'une annonce.
+
+    tayara met la ville dans l'URL : une même annonce (même identifiant final
+    à 24 caractères hexadécimaux) apparaît sous plusieurs liens si le vendeur
+    change de localisation. Les autres sources gardent leur lien.
+    """
+    s = liens.astype(str).str.strip()
+    ids = s.str.extract(_ID_TAYARA, expand=False)
+    return ("tayara:" + ids).where(ids.notna(), s)
+
+
+def cle_republication(df: pd.DataFrame) -> pd.Series:
+    """Clé STRICTE pour supprimer les republications d'une même voiture.
+
+    Plus prudente que ``cle_doublon`` (utilisée pour grouper la validation
+    croisée) : on n'efface une ligne que si le kilométrage ET le prix sont
+    connus, en plus de la marque, du modèle et de l'année.
+    """
+    colonnes = COLONNES_CLE + tuple(c for c in ("Energie", "Boite_Vitesse") if c in df.columns)
+    cle = cle_doublon(df, colonnes)
+    km = pd.to_numeric(df.get("Kilométrage"), errors="coerce") if "Kilométrage" in df else pd.Series(index=df.index)
+    prix = pd.to_numeric(df.get("Prix"), errors="coerce") if "Prix" in df else pd.Series(index=df.index)
+    sur = km.notna() & prix.notna() & (km > 0)
+    return cle.where(sur, "unique:" + df.index.astype(str))

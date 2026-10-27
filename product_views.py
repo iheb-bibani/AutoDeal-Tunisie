@@ -171,10 +171,15 @@ def _est_vrai(serie) -> pd.Series:
 
 
 def _texte_baisse(row) -> str:
+    """Signaux de négociation : baisse de prix, republications répétées."""
+    morceaux = []
     var = pd.to_numeric(pd.Series([row.get("Variation_Prix_Pct")]), errors="coerce").iloc[0]
-    if pd.isna(var) or var > -3:
-        return ""
-    return f" · 📉 prix baissé de {abs(var):.0f} % (était {_fmt_int(row.get('Prix_Initial'), ' DT')})"
+    if pd.notna(var) and var <= -3:
+        morceaux.append(f"📉 prix baissé de {abs(var):.0f} % (était {_fmt_int(row.get('Prix_Initial'), ' DT')})")
+    nb = pd.to_numeric(pd.Series([row.get("Nb_Publications")]), errors="coerce").iloc[0]
+    if pd.notna(nb) and nb >= 2:
+        morceaux.append(f"🔁 publiée {int(nb)} fois")
+    return "".join(f" · {m}" for m in morceaux)
 
 
 def _set_detail(row):
@@ -438,6 +443,10 @@ def page_detail(df, bundle=None):
               help=(f"Fourchette à 80 % : {_fmt_int(ml_low, ' DT')} – {_fmt_int(ml_high, ' DT')}" if ml_low else None))
     c3.metric("Médiane marché", _fmt_int(market.median_price, " DT"))
     c4.metric("Confiance", f"{confidence}/100 · {confidence_label}")
+    signaux = _texte_baisse(row).lstrip(" ·")
+    if signaux:
+        st.info(f"Signaux de négociation : {signaux.replace(' · ', ' · ')}. "
+                "Un vendeur qui baisse son prix ou republie son annonce est souvent ouvert à la discussion.")
 
     st.markdown("## Ce que dit le marché")
     if market.n_comparables >= 5:
