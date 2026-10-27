@@ -152,3 +152,17 @@ def test_lien_canonique_tayara_ignore_la_ville():
     ])
     c = lien_canonique(liens)
     assert c.iloc[0] == c.iloc[1] != c.iloc[2]
+
+
+def test_inference_insensible_a_la_casse():
+    from core.inference import preparer_lignes
+
+    bundle = {"features_numeriques": [], "features_categorielles": ["Marque", "Modèle"],
+              "marques_connues": ["Peugeot", "Mercedes-Benz"], "modeles_connus": ["208", "Golf 7", "Classe C"]}
+    X = preparer_lignes(bundle, pd.DataFrame([
+        {"Marque": "peugeot", "Modèle": "208"},
+        {"Marque": "MERCEDES-BENZ", "Modèle": "classe c"},
+        {"Marque": "Peugeot", "Modèle": "golf7"},
+    ]))
+    assert X["Marque"].tolist() == ["Peugeot", "Mercedes-Benz", "Peugeot"]
+    assert X["Modèle"].tolist() == ["208", "Classe C", "Golf 7"]

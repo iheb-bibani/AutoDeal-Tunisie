@@ -215,3 +215,17 @@ def test_sans_catalogue_une_disparition_reelle_n_est_pas_annulee(env):
     monkeypatch.setattr(sa, "charger_catalogues", lambda: {})
     sa.mettre_a_jour()
     assert _charger(suivi).loc["L0", "Statut"] == "Disparue"
+
+
+def test_catalogue_d_un_scraper_expire_reste_exploitable_comme_partiel(env):
+    import json
+
+    tmp_path, monkeypatch, suivi = env
+    manifeste = tmp_path / "run.json"
+    manifeste.write_text(json.dumps({"scrapers": {"tayara": {"status": "timeout"}}}))
+    monkeypatch.setattr(sa, "MANIFESTE", str(manifeste))
+    monkeypatch.setattr(sa, "charger_catalogues", lambda: _cats(tayara={"A": None, "B": None}))
+    obs = sa.observations_du_jour()
+    assert obs is not None
+    liens, _, completes, partielles = obs
+    assert liens == {"A", "B"} and not completes and "tayara.tn" in partielles

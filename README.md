@@ -161,6 +161,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/valuation/estimate \
 |---|---|---|
 | `AUTODEAL_API_KEY` | protège le radar de deals | (ouverte) |
 | `AUTODEAL_RATE_LIMIT_PER_MIN` | requêtes `/api/*` par IP et par minute (0 = illimité) | `120` |
+| `FORWARDED_ALLOW_IPS` | IP/CIDR du reverse proxy autorisé à transmettre l'IP client (jamais `*`) | `127.0.0.1` |
 | `AUTODEAL_CORS_ORIGINS` | origines autorisées | localhost:8501 |
 
 Image Docker de l'API (dépendances minimales, utilisateur non root) : `make docker` puis `docker run -p 8000:8000 -e AUTODEAL_API_KEY=... autodeal-api`.
@@ -314,7 +315,7 @@ aléatoire, étaient optimistes d'environ 1,5 point à cause de ces doublons.
 
 L'ancienne règle donnait deux tiers du poids aux stress-tests et faisait alterner HistGradientBoosting et XGBoost d'une nuit à l'autre.
 
-**Fourchettes de prix calibrées** (`core/intervalles.py`). Les fourchettes affichées sont des intervalles à 80 % appris sur les erreurs hors échantillon du modèle, par tranche de prix (plus larges en haut de gamme). Leur couverture réelle est mesurée sur les annonces les plus récentes et publiée dans `diagnostics_modele.json` (≈ 83 % pour 80 % visés au 27/10/2026). L'ancienne fourchette « ± erreur médiane » ne contenait le vrai prix qu'environ une fois sur deux.
+**Fourchettes de prix calibrées** (`core/intervalles.py`). Les fourchettes affichées sont des intervalles à 80 % appris sur les erreurs hors échantillon du modèle, par tranche de prix (plus larges en haut de gamme). Leur couverture est mesurée par un **test prospectif** (modèle et calibration appris sur les annonces antérieures au 16/10, mesure sur les 618 annonces suivantes) et publiée dans `diagnostics_modele.json` : **83,7 %** pour 80 % visés au 27/10/2026. Les tranches trop petites (voitures < 15 000 DT) sont regroupées avec leurs voisines plutôt que de prendre l'intervalle global, trop étroit pour elles. L'ancienne fourchette « ± erreur médiane » ne contenait le vrai prix qu'environ une fois sur deux.
 
 Le source-holdout d'`autocentral.tn (facebook)` reste très difficile (~52 %) : la source est en quarantaine pour les alertes automatiques.
 

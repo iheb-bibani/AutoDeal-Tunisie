@@ -49,10 +49,22 @@ def calibrer(y_log, pred_log, niveau: float = NIVEAU) -> dict:
     residus = y_log[ok] - pred_log[ok]
     tranches = tranche_de(np.expm1(pred_log[ok])).to_numpy()
     calib = {"niveau": niveau, "echelle": "log-prix", "global": _quantiles(residus, niveau), "par_tranche": {}}
-    for t in LIBELLES_TRANCHES:
-        r = residus[tranches == t]
-        if len(r) >= MIN_PAR_TRANCHE:
-            calib["par_tranche"][t] = _quantiles(r, niveau)
+    # Tranche trop petite : regroupée avec ses voisines (et non remplacée par
+    # les quantiles globaux, trop étroits pour les extrêmes : les voitures très
+    # bon marché ont les écarts relatifs les plus forts).
+    for i, t in enumerate(LIBELLES_TRANCHES):
+        if not (tranches == t).any():
+            continue
+        lo = hi = i
+        masque = tranches == t
+        while masque.sum() < MIN_PAR_TRANCHE and (lo > 0 or hi < len(LIBELLES_TRANCHES) - 1):
+            lo, hi = max(lo - 1, 0), min(hi + 1, len(LIBELLES_TRANCHES) - 1)
+            masque = np.isin(tranches, LIBELLES_TRANCHES[lo:hi + 1])
+        if masque.sum() >= MIN_PAR_TRANCHE:
+            q = _quantiles(residus[masque], niveau)
+            if hi > lo:
+                q["regroupe_avec"] = LIBELLES_TRANCHES[lo:hi + 1]
+            calib["par_tranche"][t] = q
     return calib
 
 
@@ -84,6 +96,38 @@ def couverture(y_brut, pred_log, calib: dict) -> dict:
         "largeur_relative_mediane_pct": round(float(np.median(largeur)) * 100, 1),
         "n": int(len(y)),
     }
+
+
+def couverture_prospective(pipeline, X, y_log, y_brut, dates, groupes, cv_factory,
+                           frac_test: float = 0.2, niveau: float = NIVEAU) -> dict | None:
+    """Couverture RÉELLE sur des annonces futures.
+
+    Le modèle est entraîné, et les quantiles calibrés (CV interne), sur les
+    seules annonces antérieures à la coupure ; la couverture est mesurée sur
+    les annonces postérieures (doublons du train retirés). C'est le scénario
+    de production. ``valider_temporellement`` réutilisait des prédictions OOF
+    issues de modèles ayant vu des annonces récentes : chiffre optimiste.
+    """
+    from sklearn.base import clone
+    from sklearn.model_selection import cross_val_predict
+
+    dates = pd.to_datetime(dates, errors="coerce")
+    if dates.notna().sum() < 300:
+        return None
+    coupure = dates.dropna().quantile(1 - frac_test)
+    train = dates.index[dates < coupure]
+    test = dates.index[dates >= coupure]
+    vus = set(groupes.loc[train])
+    test = pd.Index([i for i in test if groupes.loc[i] not in vus])
+    if len(train) < 300 or len(test) < 50:
+        return None
+    oof_train = cross_val_predict(clone(pipeline), X.loc[train], y_log.loc[train],
+                                  cv=cv_factory(), groups=groupes.loc[train])
+    calib = calibrer(y_log.loc[train], oof_train, niveau)
+    modele = clone(pipeline).fit(X.loc[train], y_log.loc[train])
+    res = couverture(y_brut.loc[test], modele.predict(X.loc[test]), calib)
+    res["coupure"] = str(pd.Timestamp(coupure).date())
+    return res
 
 
 def valider_temporellement(dates: pd.Series, y_log, pred_log, y_brut, frac_test: float = 0.2,

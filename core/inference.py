@@ -36,13 +36,27 @@ def regrouper_categories(X: pd.DataFrame, marques_connues=None, modeles_connus=N
     X = X.copy()
     if "Marque" in X and marques_connues is not None:
         connues = set(marques_connues)
+        X["Marque"] = _canoniser(X["Marque"], connues)
         X["Marque"] = X["Marque"].where(X["Marque"].isna() | X["Marque"].isin(connues), "Autre")
     if "Modèle" in X:
         X["Modèle"] = X["Modèle"].fillna("Inconnu")
         if modeles_connus is not None:
             connus = set(modeles_connus)
+            X["Modèle"] = _canoniser(X["Modèle"], connus)
             X["Modèle"] = X["Modèle"].where(X["Modèle"].isin(connus), "Autre_modele")
     return X
+
+
+def _cle_texte(v) -> str:
+    return "".join(str(v).casefold().split()).replace("-", "")
+
+
+def _canoniser(serie: pd.Series, connues: set) -> pd.Series:
+    """Ramène une saisie libre au libellé appris ("peugeot" -> "Peugeot",
+    "serie 3" / "Série 3" restent distincts des accents, "golf7" -> "Golf 7")."""
+    table = {_cle_texte(c): c for c in connues}
+    return serie.map(lambda v: v if (v is None or (isinstance(v, float) and np.isnan(v)) or v in connues)
+                     else table.get(_cle_texte(v), v))
 
 
 def preparer_lignes(bundle: dict, lignes) -> pd.DataFrame:

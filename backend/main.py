@@ -43,14 +43,24 @@ API_VERSION = "2.1.0"
 RATE_LIMIT_PER_MIN = int(os.getenv("AUTODEAL_RATE_LIMIT_PER_MIN", "120"))
 
 
+def cle_api_valide(x_api_key: str | None) -> bool:
+    """True si aucune clé n'est configurée, ou si la clé fournie est la bonne."""
+    attendue = os.getenv("AUTODEAL_API_KEY")
+    if not attendue:
+        return True
+    return bool(x_api_key) and hmac.compare_digest(x_api_key.encode(), attendue.encode())
+
+
+# Colonnes qui constituent le radar de deals : réservées aux détenteurs de clé.
+COLONNES_RADAR = ("Prix_Theorique", "Score_Opportunite", "Nb_Comparables", "Fiabilite_Estimation",
+                  "Prix_Bas_80", "Prix_Haut_80")
+
+
 def exiger_cle_api(x_api_key: Annotated[str | None, Header()] = None) -> None:
     """Protège les données à valeur commerciale (radar de deals, tri par
     opportunité) quand ``AUTODEAL_API_KEY`` est défini. Sans variable, l'API
     reste ouverte (développement local, compatibilité)."""
-    attendue = os.getenv("AUTODEAL_API_KEY")
-    if not attendue:
-        return
-    if not x_api_key or not hmac.compare_digest(x_api_key.encode(), attendue.encode()):
+    if not cle_api_valide(x_api_key):
         raise HTTPException(status_code=401, detail="Clé API manquante ou invalide (en-tête X-API-Key).")
 
 
@@ -67,6 +77,8 @@ class _LimiteurDebit:
             return True
         maintenant = time.monotonic()
         with self._lock:
+            if len(self._hits) > self.MAX_CLES:
+                self._purger(maintenant)
             hits = self._hits[cle]
             while hits and maintenant - hits[0] > 60:
                 hits.popleft()
@@ -74,6 +86,13 @@ class _LimiteurDebit:
                 return False
             hits.append(maintenant)
             return True
+
+    MAX_CLES = 10_000
+
+    def _purger(self, maintenant: float) -> None:
+        """Supprime les IP inactives depuis plus d'une minute (mémoire bornée)."""
+        for cle in [k for k, h in self._hits.items() if not h or maintenant - h[-1] > 60]:
+            del self._hits[cle]
 
 
 limiteur = _LimiteurDebit(RATE_LIMIT_PER_MIN)
@@ -204,17 +223,23 @@ def listings(
     max_mileage_km: Annotated[float | None, Query(ge=0)] = None,
     min_opportunity_pct: Annotated[float | None, Query(ge=-100, le=100)] = None,
     sort: Annotated[
-        str,
-        Query(pattern="^(opportunity|price_asc|price_desc|newest)$"),
-    ] = "opportunity",
+        str | None,
+        Query(pattern="^(opportunity|price_asc|price_desc|newest)$",
+              description="Défaut : opportunity avec clé API valide, newest sinon."),
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     repo: MarketRepository = Depends(get_repository),
     x_api_key: Annotated[str | None, Header()] = None,
 ) -> dict:
-    # Le classement par opportunité EST le radar de deals : même protection.
-    if sort == "opportunity" or min_opportunity_pct is not None:
-        exiger_cle_api(x_api_key)
+    # Le classement par opportunité et les scores SONT le radar de deals.
+    # Sans clé valide : tri par défaut "newest", scores retirés de la réponse
+    # (sinon un tri client sur Score_Opportunite reconstruisait le radar).
+    radar = cle_api_valide(x_api_key)
+    if sort is None:
+        sort = "opportunity" if radar else "newest"
+    if not radar and (sort == "opportunity" or min_opportunity_pct is not None):
+        raise HTTPException(status_code=401, detail="Clé API requise pour le tri par opportunité (en-tête X-API-Key).")
     df = repo.scored()
     if df.empty:
         return {"total": 0, "offset": offset, "limit": limit, "items": []}
@@ -274,6 +299,8 @@ def listings(
         ]
         if c in d.columns
     ]
+    if not radar:
+        columns = [c for c in columns if c not in COLONNES_RADAR]
     return {
         "total": total,
         "offset": offset,

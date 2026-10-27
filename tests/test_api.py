@@ -143,9 +143,16 @@ def test_cle_api_protege_le_radar_de_deals(monkeypatch):
         assert c.get("/api/v1/deals").status_code == 401
         assert c.get("/api/v1/deals", headers={"X-API-Key": "faux"}).status_code == 401
         assert c.get("/api/v1/deals", headers={"X-API-Key": "secret"}).status_code == 200
-        # Tri par opportunité = radar : protégé ; tri par prix : public.
-        assert c.get("/api/v1/listings").status_code == 401
-        assert c.get("/api/v1/listings", params={"sort": "price_asc"}).status_code == 200
+        # Sans clé : appel par défaut OK (tri récent), mais sans les scores du radar.
+        r = c.get("/api/v1/listings")
+        assert r.status_code == 200
+        assert all("Score_Opportunite" not in it and "Prix_Theorique" not in it for it in r.json()["items"])
+        r = c.get("/api/v1/listings", params={"sort": "price_asc", "limit": 200})
+        assert all("Score_Opportunite" not in it for it in r.json()["items"])
+        # Tri par opportunité = radar : 401 sans clé, scores présents avec clé.
+        assert c.get("/api/v1/listings", params={"sort": "opportunity"}).status_code == 401
+        r = c.get("/api/v1/listings", headers={"X-API-Key": "secret"})
+        assert r.status_code == 200 and "Score_Opportunite" in r.json()["items"][0]
 
 
 def test_sans_cle_configuree_l_api_reste_ouverte(monkeypatch):
@@ -160,3 +167,16 @@ def test_limitation_de_debit():
     limiteur = m._LimiteurDebit(3)
     assert [limiteur.autoriser("ip") for _ in range(4)] == [True, True, True, False]
     assert limiteur.autoriser("autre-ip")
+
+
+def test_limiteur_memoire_bornee():
+    import backend.main as m
+
+    limiteur = m._LimiteurDebit(5)
+    limiteur.MAX_CLES = 10
+    for i in range(50):
+        limiteur.autoriser(f"ip{i}")
+    # Les IP actives restent comptées : la purge ne retire que les inactives.
+    assert len(limiteur._hits) <= 50
+    limiteur._purger(__import__("time").monotonic() + 120)
+    assert len(limiteur._hits) == 0

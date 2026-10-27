@@ -38,4 +38,9 @@ select pg_temp.verifier(
    where user_id = '00000000-0000-0000-0000-000000000005'),
   'le rôle admin ne doit jamais pouvoir être demandé à l''inscription');
 
+select pg_temp.verifier(
+  not has_function_privilege('anon', 'public.autodeal_accorder_essai(uuid, text, text)', 'execute')
+  and not has_function_privilege('authenticated', 'public.autodeal_accorder_essai(uuid, text, text)', 'execute'),
+  'la fonction d''essai ne doit pas être appelable par les clients (RPC PostgREST)');
+
 \echo 'OK : règles d''essai gratuit vérifiées'

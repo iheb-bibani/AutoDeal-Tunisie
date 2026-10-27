@@ -117,11 +117,14 @@ def observations_du_jour():
     completes: set[str] = set()
     partielles: dict[str, set[str]] = {}
     for source, cat in catalogues.items():
-        if source in echecs or source not in SOURCE_LABELS:
+        if source not in SOURCE_LABELS:
             continue
         label = SOURCE_LABELS[source]
         vus_source = {str(lien) for lien in cat["liens"]}
-        if cat.get("complet"):
+        # Un scraper peut expirer APRÈS avoir publié son catalogue (pendant la
+        # visite des fiches) : le catalogue reste exploitable, mais par
+        # prudence comme catalogue partiel (fenêtre de dates couverte).
+        if cat.get("complet") and source not in echecs:
             completes.add(label)
         else:
             partielles[label] = vus_source

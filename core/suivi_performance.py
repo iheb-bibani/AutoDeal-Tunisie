@@ -87,6 +87,17 @@ def _instantane(df: pd.DataFrame) -> dict:
     return snap
 
 
+def _harmoniser_tranches(entree: dict) -> dict:
+    """Anciennes entrées : libellés "15-25k" (tiret) -> "15–25k" (config)."""
+    import re
+
+    for cle in ("mdape_par_tranche", "performance_par_tranche"):
+        bloc = entree.get(cle)
+        if isinstance(bloc, dict):
+            entree[cle] = {re.sub(r"^(\d+)-(\d+k)$", r"\1–\2", k): v for k, v in bloc.items()}
+    return entree
+
+
 class HistoriqueIllisible(RuntimeError):
     pass
 
@@ -101,7 +112,7 @@ def _charger_historique() -> list[dict]:
         data = json.loads(HISTORIQUE_PATH.read_text(encoding="utf-8"))
         if not isinstance(data, list):
             raise ValueError("historique non-liste")
-        return data
+        return [_harmoniser_tranches(e) for e in data]
     except Exception as exc:
         sauvegarde = HISTORIQUE_PATH.with_suffix(
             f".corrupt-{datetime.now().strftime('%Y%m%d%H%M%S')}.json"

@@ -33,3 +33,30 @@ def test_validation_temporelle_mesure_hors_echantillon():
 def test_sans_calibration_renvoie_nan():
     b, h = intervalle(30000.0, None)
     assert np.isnan(b) and np.isnan(h)
+
+
+def test_couverture_prospective_sur_annonces_futures():
+    from sklearn.linear_model import LinearRegression
+    from sklearn.model_selection import GroupKFold
+
+    from core.intervalles import couverture_prospective
+
+    rng = np.random.default_rng(3)
+    n = 1200
+    X = pd.DataFrame({"x": rng.uniform(0, 1, n)})
+    y = pd.Series(10 + X["x"] * 1.5 + rng.normal(0, 0.15, n))
+    dates = pd.Series(pd.date_range("2026-07-01", periods=n, freq="2h"))
+    groupes = pd.Series(np.arange(n).astype(str))
+    res = couverture_prospective(LinearRegression(), X, y, np.expm1(y), dates, groupes,
+                                 cv_factory=lambda: GroupKFold(n_splits=5))
+    assert res is not None and 72 <= res["couverture_pct"] <= 88 and res["n"] >= 200
+
+
+def test_petite_tranche_regroupee_avec_ses_voisines():
+    y, pred = _donnees(n=3000)
+    # Quelques voitures très bon marché seulement.
+    pred = np.concatenate([pred, np.log1p(np.full(20, 9000.0))])
+    y = np.concatenate([y, pred[-20:] + np.random.default_rng(0).normal(0, 0.4, 20)])
+    calib = calibrer(y, pred)
+    assert "< 15k" in calib["par_tranche"]
+    assert "regroupe_avec" in calib["par_tranche"]["< 15k"]

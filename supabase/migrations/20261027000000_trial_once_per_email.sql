@@ -129,6 +129,13 @@ begin
 end;
 $$;
 
+-- Fonctions internes : appelées uniquement par les triggers (propriétaire de
+-- la fonction). Sans ce REVOKE, PostgREST les exposait en RPC et n'importe
+-- quel client (anon/authenticated) pouvait s'accorder un essai.
+revoke execute on function public.autodeal_accorder_essai(uuid, text, text) from public, anon, authenticated;
+revoke execute on function public.handle_autodeal_new_user() from public, anon, authenticated;
+revoke execute on function public.handle_autodeal_email_confirmed() from public, anon, authenticated;
+
 drop trigger if exists on_auth_user_confirmed_autodeal on auth.users;
 create trigger on_auth_user_confirmed_autodeal
 after update of email_confirmed_at on auth.users

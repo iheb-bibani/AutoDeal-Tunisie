@@ -1,5 +1,5 @@
 {
-  "date_entrainement": "2026-10-27T10:30:57",
+  "date_entrainement": "2026-10-27T10:37:52",
   "n_annonces": 3054,
   "n_vehicules_distincts": 3007,
   "n_folds": 5,
@@ -308,14 +308,15 @@
   "intervalles_prediction": {
     "niveau_cible_pct": 80,
     "in_sample": {
-      "couverture_pct": 79.8,
+      "couverture_pct": 80.1,
       "largeur_relative_mediane_pct": 44.3,
       "n": 3054
     },
-    "holdout_temporel": {
-      "couverture_pct": 84.0,
-      "largeur_relative_mediane_pct": 46.7,
-      "n": 619
+    "prospectif": {
+      "couverture_pct": 83.7,
+      "largeur_relative_mediane_pct": 49.4,
+      "n": 618,
+      "coupure": "2026-10-16"
     },
     "calibration": {
       "niveau": 0.8,
@@ -326,6 +327,15 @@
         "n": 3054
       },
       "par_tranche": {
+        "< 15k": {
+          "q_bas": -0.333123922491017,
+          "q_haut": 0.3957150293865037,
+          "n": 280,
+          "regroupe_avec": [
+            "< 15k",
+            "15–25k"
+          ]
+        },
         "15–25k": {
           "q_bas": -0.2989013406669722,
           "q_haut": 0.33957040262120985,

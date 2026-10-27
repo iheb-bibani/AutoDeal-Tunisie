@@ -17,6 +17,7 @@ import os
 import numpy as np
 import pandas as pd
 
+from core.doublons import lien_canonique
 from scrapers.liens_vus import charger_catalogues
 from scrapers.parsing import parser_prix_tnd
 
@@ -59,8 +60,17 @@ def appliquer_prix_actuel(df: pd.DataFrame, du_jour: dict | None = None, suivi: 
     df = df.copy()
     initial = pd.to_numeric(df["Prix"], errors="coerce")
     df["Prix_Initial"] = initial
-    liens = df["Lien"].astype(str)
-    actuel = liens.map(du_jour).fillna(liens.map(suivi))
+    # Lien canonique : une annonce tayara qui change de ville (URL différente)
+    # garde son historique de prix.
+    liens = lien_canonique(df["Lien"])
+
+    def _canon(d: dict) -> dict:
+        if not d:
+            return {}
+        cles = lien_canonique(pd.Series(list(d.keys()), dtype=str))
+        return dict(zip(cles, d.values(), strict=True))
+
+    actuel = liens.map(_canon(du_jour)).fillna(liens.map(_canon(suivi)))
     ratio = actuel / initial
     plausible = actuel.notna() & initial.notna() & ratio.between(RATIO_MIN, RATIO_MAX)
     df["Prix"] = initial.where(~plausible, actuel)

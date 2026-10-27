@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.doublons import cle_doublon  # noqa: E402
 from core.inference import regrouper_categories, shap_par_feature  # noqa: E402
-from core.intervalles import NIVEAU, calibrer, couverture, intervalle, valider_temporellement  # noqa: E402
+from core.intervalles import NIVEAU, calibrer, couverture, couverture_prospective, intervalle  # noqa: E402
 from core.io_atomique import dump_joblib_atomique, ecrire_csv_atomique, ecrire_json_atomique  # noqa: E402
 from config import (  # noqa: E402
     FEATURES_CATEGORIELLES,
@@ -572,12 +572,16 @@ def main():
     couverture_intervalles = {
         "niveau_cible_pct": round(NIVEAU * 100),
         "in_sample": couverture(df[CIBLE], pred_oof, calibration),
-        "holdout_temporel": valider_temporellement(df.get("Annonce-Detectee"), y, pred_oof, df[CIBLE]),
+        # Test prospectif : modèle et calibration appris sur le passé seulement.
+        "prospectif": couverture_prospective(
+            meilleur_pipeline, X, y, df[CIBLE], df.get("Annonce-Detectee"), groupes,
+            cv_factory=lambda: cv_groupee(n_splits),
+        ),
     }
-    ht = couverture_intervalles["holdout_temporel"]
+    ht = couverture_intervalles["prospectif"]
     if ht:
-        print(f"Fourchettes {NIVEAU:.0%} : couverture holdout temporel {ht['couverture_pct']} % "
-              f"(largeur médiane {ht['largeur_relative_mediane_pct']} %)")
+        print(f"Fourchettes {NIVEAU:.0%} : couverture prospective {ht['couverture_pct']} % "
+              f"(largeur médiane {ht['largeur_relative_mediane_pct']} %, après le {ht['coupure']})")
 
     date_entrainement = datetime.now().isoformat(timespec="seconds")
     diagnostics = {
