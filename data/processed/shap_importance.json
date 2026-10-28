@@ -6,43 +6,43 @@
   "importances": [
     {
       "feature": "Cylindree",
-      "pct": 23.2
+      "pct": 21.9
     },
     {
       "feature": "Age_Vehicule",
-      "pct": 19.5
+      "pct": 19.1
     },
     {
       "feature": "Modèle",
-      "pct": 18.2
+      "pct": 18.1
     },
     {
       "feature": "Age_Carre",
-      "pct": 9.0
+      "pct": 9.9
     },
     {
       "feature": "Kilométrage",
-      "pct": 8.8
-    },
-    {
-      "feature": "Marque",
-      "pct": 6.7
+      "pct": 8.4
     },
     {
       "feature": "Km_Par_An",
-      "pct": 6.0
+      "pct": 8.1
+    },
+    {
+      "feature": "Marque",
+      "pct": 5.3
     },
     {
       "feature": "Log_Kilometrage",
-      "pct": 4.0
+      "pct": 4.9
     },
     {
       "feature": "Energie",
-      "pct": 3.7
+      "pct": 3.5
     },
     {
       "feature": "Boite_Vitesse",
-      "pct": 0.9
+      "pct": 0.8
     },
     {
       "feature": "Puissance_Fiscale",
@@ -53,5 +53,5 @@
       "pct": 0.0
     }
   ],
-  "date_calcul": "2026-10-27T10:38:07"
+  "date_calcul": "2026-10-28T02:46:24"
 }
