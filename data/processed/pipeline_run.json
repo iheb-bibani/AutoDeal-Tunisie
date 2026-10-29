@@ -1,42 +1,42 @@
 {
-  "started_at": "2026-10-28T02:04:08+00:00",
-  "finished_at": "2026-10-28T02:46:26+00:00",
+  "started_at": "2026-10-29T02:12:24+00:00",
+  "finished_at": "2026-10-29T02:56:06+00:00",
   "status": "success",
   "scrapers": {
     "tayara": {
       "script": "scrapers/scraper_tayara.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 1221.6,
-      "finished_at": "2026-10-28T02:24:30+00:00"
+      "duration_seconds": 1325.3,
+      "finished_at": "2026-10-29T02:34:29+00:00"
     },
     "automobile": {
       "script": "scrapers/scraper_automobile.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 1095.4,
-      "finished_at": "2026-10-28T02:42:47+00:00"
+      "duration_seconds": 1089.3,
+      "finished_at": "2026-10-29T02:52:40+00:00"
     },
     "automax": {
       "script": "scrapers/scraper_automax.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 96.7,
-      "finished_at": "2026-10-28T02:44:26+00:00"
+      "duration_seconds": 85.3,
+      "finished_at": "2026-10-29T02:54:08+00:00"
     },
     "sayyarat": {
       "script": "scrapers/scraper_sayyarat.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 37.8,
-      "finished_at": "2026-10-28T02:45:06+00:00"
+      "duration_seconds": 35.2,
+      "finished_at": "2026-10-29T02:54:45+00:00"
     },
     "autocentral": {
       "script": "scrapers/scraper_autocentral.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 2.1,
-      "finished_at": "2026-10-28T02:45:10+00:00"
+      "duration_seconds": 2.7,
+      "finished_at": "2026-10-29T02:54:50+00:00"
     }
   },
   "processing": {
@@ -44,63 +44,57 @@
       "script": "core/merging_files.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 0.8,
-      "finished_at": "2026-10-28T02:45:13+00:00"
+      "duration_seconds": 0.7,
+      "finished_at": "2026-10-29T02:54:53+00:00"
     },
     "core/nettoyer_base.py": {
       "script": "core/nettoyer_base.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 2.1,
-      "finished_at": "2026-10-28T02:45:15+00:00"
+      "duration_seconds": 2.0,
+      "finished_at": "2026-10-29T02:54:55+00:00"
     },
     "core/enrichir_base_avance.py": {
       "script": "core/enrichir_base_avance.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 0.6,
-      "finished_at": "2026-10-28T02:45:16+00:00"
+      "duration_seconds": 0.5,
+      "finished_at": "2026-10-29T02:54:55+00:00"
     },
     "core/modele_prediction.py": {
       "script": "core/modele_prediction.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 68.8,
-      "finished_at": "2026-10-28T02:46:24+00:00"
+      "duration_seconds": 69.5,
+      "finished_at": "2026-10-29T02:56:05+00:00"
     },
     "core/detect_deals.py": {
       "script": "core/detect_deals.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 0.5,
-      "finished_at": "2026-10-28T02:46:25+00:00"
+      "duration_seconds": 0.6,
+      "finished_at": "2026-10-29T02:56:05+00:00"
     },
     "core/suivi_annonces.py": {
       "script": "core/suivi_annonces.py",
       "status": "success",
       "returncode": 0,
       "duration_seconds": 0.7,
-      "finished_at": "2026-10-28T02:46:26+00:00"
+      "finished_at": "2026-10-29T02:56:06+00:00"
     }
   },
   "catalogues": {
-    "tayara": {
-      "liens_vus": 1781,
-      "complet": true,
-      "nouvelles": 306,
-      "pages": 60
-    },
-    "sayyarat": {
-      "liens_vus": 47,
-      "complet": true,
-      "nouvelles": 0,
-      "pages": null
-    },
     "automobile": {
       "liens_vus": 1698,
       "complet": false,
-      "nouvelles": 50,
+      "nouvelles": 32,
       "pages": 160
+    },
+    "tayara": {
+      "liens_vus": 1781,
+      "complet": true,
+      "nouvelles": 314,
+      "pages": 60
     },
     "autocentral": {
       "liens_vus": 11,
@@ -108,10 +102,16 @@
       "nouvelles": 0,
       "pages": null
     },
-    "automax": {
-      "liens_vus": 426,
+    "sayyarat": {
+      "liens_vus": 45,
       "complet": true,
       "nouvelles": 0,
+      "pages": null
+    },
+    "automax": {
+      "liens_vus": 427,
+      "complet": true,
+      "nouvelles": 1,
       "pages": 37
     }
   }
