@@ -1,42 +1,42 @@
 {
-  "started_at": "2026-11-08T02:07:07+00:00",
-  "finished_at": "2026-11-08T02:51:01+00:00",
+  "started_at": "2026-11-09T02:26:53+00:00",
+  "finished_at": "2026-11-09T03:11:47+00:00",
   "status": "success",
   "scrapers": {
     "tayara": {
       "script": "scrapers/scraper_tayara.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 1347.1,
-      "finished_at": "2026-11-08T02:29:34+00:00"
+      "duration_seconds": 1458.7,
+      "finished_at": "2026-11-09T02:51:12+00:00"
     },
     "automobile": {
       "script": "scrapers/scraper_automobile.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 1056.2,
-      "finished_at": "2026-11-08T02:47:13+00:00"
+      "duration_seconds": 1002.5,
+      "finished_at": "2026-11-09T03:07:57+00:00"
     },
     "automax": {
       "script": "scrapers/scraper_automax.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 87.6,
-      "finished_at": "2026-11-08T02:48:42+00:00"
+      "duration_seconds": 92.3,
+      "finished_at": "2026-11-09T03:09:31+00:00"
     },
     "sayyarat": {
       "script": "scrapers/scraper_sayyarat.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 33.0,
-      "finished_at": "2026-11-08T02:49:17+00:00"
+      "duration_seconds": 32.5,
+      "finished_at": "2026-11-09T03:10:05+00:00"
     },
     "autocentral": {
       "script": "scrapers/scraper_autocentral.py",
       "status": "success",
       "returncode": 0,
       "duration_seconds": 2.3,
-      "finished_at": "2026-11-08T02:49:22+00:00"
+      "finished_at": "2026-11-09T03:10:10+00:00"
     }
   },
   "processing": {
@@ -44,62 +44,62 @@
       "script": "core/merging_files.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 1.0,
-      "finished_at": "2026-11-08T02:49:25+00:00"
+      "duration_seconds": 0.9,
+      "finished_at": "2026-11-09T03:10:13+00:00"
     },
     "core/nettoyer_base.py": {
       "script": "core/nettoyer_base.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 3.0,
-      "finished_at": "2026-11-08T02:49:28+00:00"
+      "duration_seconds": 2.7,
+      "finished_at": "2026-11-09T03:10:16+00:00"
     },
     "core/enrichir_base_avance.py": {
       "script": "core/enrichir_base_avance.py",
       "status": "success",
       "returncode": 0,
       "duration_seconds": 0.7,
-      "finished_at": "2026-11-08T02:49:29+00:00"
+      "finished_at": "2026-11-09T03:10:16+00:00"
     },
     "core/modele_prediction.py": {
       "script": "core/modele_prediction.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 91.2,
-      "finished_at": "2026-11-08T02:51:00+00:00"
+      "duration_seconds": 89.1,
+      "finished_at": "2026-11-09T03:11:46+00:00"
     },
     "core/detect_deals.py": {
       "script": "core/detect_deals.py",
       "status": "success",
       "returncode": 0,
       "duration_seconds": 0.7,
-      "finished_at": "2026-11-08T02:51:00+00:00"
+      "finished_at": "2026-11-09T03:11:46+00:00"
     },
     "core/suivi_annonces.py": {
       "script": "core/suivi_annonces.py",
       "status": "success",
       "returncode": 0,
       "duration_seconds": 0.9,
-      "finished_at": "2026-11-08T02:51:01+00:00"
+      "finished_at": "2026-11-09T03:11:47+00:00"
     }
   },
   "catalogues": {
     "automax": {
-      "liens_vus": 433,
+      "liens_vus": 434,
       "complet": true,
-      "nouvelles": 2,
+      "nouvelles": 0,
       "pages": 38
     },
     "tayara": {
-      "liens_vus": 1754,
+      "liens_vus": 1750,
       "complet": true,
-      "nouvelles": 306,
+      "nouvelles": 316,
       "pages": 59
     },
     "sayyarat": {
       "liens_vus": 47,
       "complet": true,
-      "nouvelles": 0,
+      "nouvelles": 1,
       "pages": null
     },
     "autocentral": {
@@ -109,9 +109,9 @@
       "pages": null
     },
     "automobile": {
-      "liens_vus": 1761,
+      "liens_vus": 1766,
       "complet": false,
-      "nouvelles": 36,
+      "nouvelles": 23,
       "pages": 160
     }
   }
