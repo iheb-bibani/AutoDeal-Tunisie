@@ -1,7 +1,7 @@
 {
-  "date_entrainement": "2026-11-11T03:18:56",
-  "n_annonces": 3104,
-  "n_vehicules_distincts": 3051,
+  "date_entrainement": "2026-11-12T04:20:54",
+  "n_annonces": 3097,
+  "n_vehicules_distincts": 3044,
   "n_folds": 5,
   "validation_croisee": "GroupKFold par véhicule (doublons inter-sources regroupés)",
   "fenetre_jours": 60,
@@ -25,162 +25,162 @@
   "candidats": [
     {
       "nom": "Ridge",
-      "mdape_pct": 11.3,
-      "mdae_dt": 5221,
-      "mae_dt": 12048
+      "mdape_pct": 10.81,
+      "mdae_dt": 5079,
+      "mae_dt": 11799
     },
     {
       "nom": "RandomForest",
-      "mdape_pct": 11.33,
-      "mdae_dt": 5552,
-      "mae_dt": 11546
+      "mdape_pct": 11.37,
+      "mdae_dt": 5446,
+      "mae_dt": 11394
     },
     {
       "nom": "HistGradientBoosting",
-      "mdape_pct": 9.75,
-      "mdae_dt": 4671,
-      "mae_dt": 10451
+      "mdape_pct": 9.55,
+      "mdae_dt": 4612,
+      "mae_dt": 10363
     },
     {
       "nom": "CatBoost",
-      "mdape_pct": 11.38,
-      "mdae_dt": 5565,
-      "mae_dt": 11249
+      "mdape_pct": 11.43,
+      "mdae_dt": 5479,
+      "mae_dt": 11065
     },
     {
       "nom": "LightGBM",
-      "mdape_pct": 11.48,
-      "mdae_dt": 5688,
-      "mae_dt": 11683
+      "mdape_pct": 11.31,
+      "mdae_dt": 5507,
+      "mae_dt": 11520
     },
     {
       "nom": "XGBoost",
-      "mdape_pct": 10.41,
-      "mdae_dt": 5028,
-      "mae_dt": 10561
+      "mdape_pct": 10.05,
+      "mdae_dt": 4937,
+      "mae_dt": 10410
     }
   ],
   "selection_robuste": {
     "shortlist": [
       {
         "nom": "HistGradientBoosting",
-        "score_robuste_pct": 12.48,
-        "erreur_production_pct": 9.62,
-        "erreur_stress_pct": 15.34
+        "score_robuste_pct": 12.28,
+        "erreur_production_pct": 9.59,
+        "erreur_stress_pct": 14.97
       },
       {
         "nom": "XGBoost",
-        "score_robuste_pct": 12.5,
-        "erreur_production_pct": 10.15,
-        "erreur_stress_pct": 14.85
+        "score_robuste_pct": 12.47,
+        "erreur_production_pct": 10.08,
+        "erreur_stress_pct": 14.87
       }
     ],
     "regle": "erreur de production (5 CV groupées + 3 holdouts temporels) ; garde-fou : stress-tests (GroupKFold marque-modèle + sources pondérées) ≤ meilleur +15% ; quasi ex-aequo départagé par les stress-tests",
-    "raison": "meilleure erreur de production (9.62%) vs 10.15% pour XGBoost"
+    "raison": "meilleure erreur de production (9.59%) vs 10.08% pour XGBoost"
   },
   "validation_robuste": {
     "groupkfold_marque_modele": {
-      "mae": 13721.517687206215,
-      "mdae": 7430.863425533953,
-      "mdape": 0.15118503905426034
+      "mae": 13241.089308164477,
+      "mdae": 7200.476793667243,
+      "mdape": 0.14951579834798717
     },
     "time_holdout_20pct": {
-      "mae": 8987.442754432173,
-      "mdae": 4517.596638922601,
-      "mdape": 0.09461808550212465
+      "mae": 8941.761911070711,
+      "mdae": 4631.085152766667,
+      "mdape": 0.09413325336856987
     },
     "source_holdout": [
       {
         "source": "autocentral.tn (facebook)",
-        "n_test": 57,
-        "mae": 62476.84164983699,
-        "mdae": 48545.53251331796,
-        "mdape": 0.5996038831412557
+        "n_test": 52,
+        "mae": 67407.70388860044,
+        "mdae": 53017.229708646104,
+        "mdape": 0.6377335679324336
       },
       {
         "source": "automobile.tn",
-        "n_test": 1951,
-        "mae": 18267.87729858752,
-        "mdae": 8124.482647443361,
-        "mdape": 0.1445624088736762
+        "n_test": 1942,
+        "mae": 17848.275581514907,
+        "mdae": 7995.123145688827,
+        "mdape": 0.1423403267290563
       },
       {
         "source": "tayara.tn",
-        "n_test": 989,
-        "mae": 11910.71755750075,
-        "mdae": 5510.076343082019,
-        "mdape": 0.1520532469258504
+        "n_test": 996,
+        "mae": 11636.269876902195,
+        "mdae": 5029.314801613489,
+        "mdape": 0.13928992487242442
       }
     ]
   },
   "validation_finalistes": {
     "HistGradientBoosting": {
       "groupkfold_marque_modele": {
-        "mae": 13721.517687206215,
-        "mdae": 7430.863425533953,
-        "mdape": 0.15118503905426034
+        "mae": 13241.089308164477,
+        "mdae": 7200.476793667243,
+        "mdape": 0.14951579834798717
       },
       "time_holdout_20pct": {
-        "mae": 8987.442754432173,
-        "mdae": 4517.596638922601,
-        "mdape": 0.09461808550212465
+        "mae": 8941.761911070711,
+        "mdae": 4631.085152766667,
+        "mdape": 0.09413325336856987
       },
       "source_holdout": [
         {
           "source": "autocentral.tn (facebook)",
-          "n_test": 57,
-          "mae": 62476.84164983699,
-          "mdae": 48545.53251331796,
-          "mdape": 0.5996038831412557
+          "n_test": 52,
+          "mae": 67407.70388860044,
+          "mdae": 53017.229708646104,
+          "mdape": 0.6377335679324336
         },
         {
           "source": "automobile.tn",
-          "n_test": 1951,
-          "mae": 18267.87729858752,
-          "mdae": 8124.482647443361,
-          "mdape": 0.1445624088736762
+          "n_test": 1942,
+          "mae": 17848.275581514907,
+          "mdae": 7995.123145688827,
+          "mdape": 0.1423403267290563
         },
         {
           "source": "tayara.tn",
-          "n_test": 989,
-          "mae": 11910.71755750075,
-          "mdae": 5510.076343082019,
-          "mdape": 0.1520532469258504
+          "n_test": 996,
+          "mae": 11636.269876902195,
+          "mdae": 5029.314801613489,
+          "mdape": 0.13928992487242442
         }
       ]
     },
     "XGBoost": {
       "groupkfold_marque_modele": {
-        "mae": 13428.954598652948,
-        "mdae": 7245.16015625,
-        "mdape": 0.15190451388888887
+        "mae": 13284.924520894716,
+        "mdae": 7214.244140625,
+        "mdape": 0.15423567708333333
       },
       "time_holdout_20pct": {
-        "mae": 9302.668926799466,
-        "mdae": 4326.341796875,
-        "mdape": 0.09921436737804878
+        "mae": 8991.727316364118,
+        "mdae": 4622.193359375,
+        "mdape": 0.10221610576923076
       },
       "source_holdout": [
         {
           "source": "autocentral.tn (facebook)",
-          "n_test": 57,
-          "mae": 55097.98999451754,
-          "mdae": 43564.1484375,
-          "mdape": 0.4843384576612903
+          "n_test": 52,
+          "mae": 57430.23268479567,
+          "mdae": 43260.1162109375,
+          "mdape": 0.49144189719394804
         },
         {
           "source": "automobile.tn",
-          "n_test": 1951,
-          "mae": 18490.264482256694,
-          "mdae": 8106.15234375,
-          "mdape": 0.1431640625
+          "n_test": 1942,
+          "mae": 18304.06971006855,
+          "mdae": 8024.73828125,
+          "mdape": 0.1422685932185374
         },
         {
           "source": "tayara.tn",
-          "n_test": 989,
-          "mae": 10577.492250695146,
-          "mdae": 4362.0,
-          "mdape": 0.12965434966216216
+          "n_test": 996,
+          "mae": 10561.720241807072,
+          "mdae": 4352.783203125,
+          "mdape": 0.12656149471507352
         }
       ]
     }
@@ -188,39 +188,39 @@
   "stabilite_finalistes": {
     "HistGradientBoosting": {
       "kfold_seeds_pct": [
-        9.52,
-        9.88,
-        9.75,
-        9.77,
-        9.8
+        9.81,
+        9.74,
+        9.55,
+        9.67,
+        9.41
       ],
       "time_holdouts_pct": [
-        8.85,
-        9.46,
-        9.97
+        9.47,
+        9.41,
+        9.63
       ],
-      "moyenne_pct": 9.62,
-      "ecart_type_pct": 0.36,
-      "min_pct": 8.85,
-      "max_pct": 9.97
+      "moyenne_pct": 9.59,
+      "ecart_type_pct": 0.15,
+      "min_pct": 9.41,
+      "max_pct": 9.81
     },
     "XGBoost": {
       "kfold_seeds_pct": [
-        10.13,
-        10.17,
-        10.41,
+        10.12,
         10.01,
-        9.95
+        10.05,
+        10.05,
+        9.96
       ],
       "time_holdouts_pct": [
-        10.17,
-        9.92,
-        10.46
+        9.96,
+        10.22,
+        10.29
       ],
-      "moyenne_pct": 10.15,
-      "ecart_type_pct": 0.2,
-      "min_pct": 9.92,
-      "max_pct": 10.46
+      "moyenne_pct": 10.08,
+      "ecart_type_pct": 0.12,
+      "min_pct": 9.96,
+      "max_pct": 10.29
     }
   },
   "diagnostic_boite_vitesses": {
@@ -232,16 +232,16 @@
         "automatique": 8
       },
       "autocentral.tn (facebook)": {
-        "n": 57,
-        "pct_renseigne": 7.0,
+        "n": 52,
+        "pct_renseigne": 7.7,
         "manuelle": 0,
         "automatique": 4
       },
       "automobile.tn": {
-        "n": 1989,
+        "n": 1980,
         "pct_renseigne": 45.6,
         "manuelle": 0,
-        "automatique": 906
+        "automatique": 903
       },
       "sayyaratn.com": {
         "n": 8,
@@ -250,27 +250,27 @@
         "automatique": 3
       },
       "tayara.tn": {
-        "n": 1022,
-        "pct_renseigne": 97.9,
-        "manuelle": 743,
-        "automatique": 258
+        "n": 1029,
+        "pct_renseigne": 98.1,
+        "manuelle": 754,
+        "automatique": 255
       }
     },
     "modeles": {
       "HistGradientBoosting": {
-        "avec_boite": 9.75,
-        "sans_boite": 10.01
+        "avec_boite": 9.55,
+        "sans_boite": 9.59
       },
       "XGBoost": {
-        "avec_boite": 10.41,
-        "sans_boite": 10.06
+        "avec_boite": 10.05,
+        "sans_boite": 9.97
       }
     }
   },
   "diagnostic_zone_economique": {
-    "production_sans_zone_mdape_pct": 9.75,
-    "avec_zone_mdape_pct": 9.76,
-    "gain_zone_points": -0.01,
+    "production_sans_zone_mdape_pct": 9.55,
+    "avec_zone_mdape_pct": 9.41,
+    "gain_zone_points": 0.13,
     "decision": "Zone exclue de la production tant que le gain n'est pas stable en source-holdout.",
     "par_source": [
       {
@@ -281,14 +281,14 @@
       },
       {
         "source": "autocentral.tn (facebook)",
-        "n": 57,
+        "n": 52,
         "part_grand_tunis_pct": 0.0,
-        "prix_median_dt": 88000
+        "prix_median_dt": 87000
       },
       {
         "source": "automobile.tn",
-        "n": 1989,
-        "part_grand_tunis_pct": 68.1,
+        "n": 1980,
+        "part_grand_tunis_pct": 68.0,
         "prix_median_dt": 58000
       },
       {
@@ -299,8 +299,8 @@
       },
       {
         "source": "tayara.tn",
-        "n": 1022,
-        "part_grand_tunis_pct": 58.0,
+        "n": 1029,
+        "part_grand_tunis_pct": 58.1,
         "prix_median_dt": 35000
       }
     ]
@@ -308,63 +308,63 @@
   "intervalles_prediction": {
     "niveau_cible_pct": 80,
     "in_sample": {
-      "couverture_pct": 80.2,
-      "largeur_relative_mediane_pct": 42.7,
-      "n": 3104
+      "couverture_pct": 80.1,
+      "largeur_relative_mediane_pct": 44.4,
+      "n": 3097
     },
     "prospectif": {
-      "couverture_pct": 84.8,
-      "largeur_relative_mediane_pct": 46.7,
-      "n": 633,
-      "coupure": "2026-10-31"
+      "couverture_pct": 83.8,
+      "largeur_relative_mediane_pct": 45.3,
+      "n": 649,
+      "coupure": "2026-11-01"
     },
     "calibration": {
       "niveau": 0.8,
       "echelle": "log-prix",
       "global": {
-        "q_bas": -0.23565091301539112,
-        "q_haut": 0.20812557499266982,
-        "n": 3104
+        "q_bas": -0.2288882236084538,
+        "q_haut": 0.22770325344431508,
+        "n": 3097
       },
       "par_tranche": {
         "< 15k": {
-          "q_bas": -0.3364363876410763,
-          "q_haut": 0.38833996442942514,
-          "n": 267,
+          "q_bas": -0.29166365880173684,
+          "q_haut": 0.4464010311351022,
+          "n": 286,
           "regroupe_avec": [
             "< 15k",
             "15–25k"
           ]
         },
         "15–25k": {
-          "q_bas": -0.3264043846008619,
-          "q_haut": 0.35988985245528343,
-          "n": 211
+          "q_bas": -0.26993546440306265,
+          "q_haut": 0.39347363043741884,
+          "n": 235
         },
         "25–35k": {
-          "q_bas": -0.23832550548291742,
-          "q_haut": 0.20922276552934066,
-          "n": 540
+          "q_bas": -0.20770871227367432,
+          "q_haut": 0.22848774357894935,
+          "n": 534
         },
         "35–50k": {
-          "q_bas": -0.20118435289228465,
-          "q_haut": 0.16583252555129233,
+          "q_bas": -0.2013744253805802,
+          "q_haut": 0.17989529180770156,
           "n": 845
         },
         "50–75k": {
-          "q_bas": -0.2279754519350766,
-          "q_haut": 0.19829900213206988,
-          "n": 694
+          "q_bas": -0.23971460560644883,
+          "q_haut": 0.1962053057697856,
+          "n": 673
         },
         "75–100k": {
-          "q_bas": -0.20725689781351458,
-          "q_haut": 0.21488912968282353,
-          "n": 325
+          "q_bas": -0.24212734680553952,
+          "q_haut": 0.2486401261832534,
+          "n": 331
         },
         "100k +": {
-          "q_bas": -0.2911180733779008,
-          "q_haut": 0.24849944105051863,
-          "n": 433
+          "q_bas": -0.27812804123676654,
+          "q_haut": 0.2620810029603688,
+          "n": 428
         }
       }
     }
