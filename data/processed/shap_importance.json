@@ -1,57 +1,57 @@
 {
-  "modele": "XGBRegressor",
+  "modele": "HistGradientBoostingRegressor",
   "status": "ok",
   "n_lignes": 120,
   "echelle": "log-prix",
   "importances": [
     {
-      "feature": "Age_Vehicule",
-      "pct": 25.1
-    },
-    {
       "feature": "Modèle",
-      "pct": 17.1
-    },
-    {
-      "feature": "Marque",
-      "pct": 14.1
-    },
-    {
-      "feature": "Energie",
-      "pct": 9.8
-    },
-    {
-      "feature": "Puissance_Fiscale",
-      "pct": 9.7
-    },
-    {
-      "feature": "Segment_Vehicule",
-      "pct": 9.7
-    },
-    {
-      "feature": "Kilométrage",
-      "pct": 4.9
-    },
-    {
-      "feature": "Age_Carre",
-      "pct": 4.2
-    },
-    {
-      "feature": "Km_Par_An",
-      "pct": 2.5
-    },
-    {
-      "feature": "Boite_Vitesse",
-      "pct": 1.4
+      "pct": 26.9
     },
     {
       "feature": "Cylindree",
-      "pct": 0.9
+      "pct": 21.1
+    },
+    {
+      "feature": "Age_Vehicule",
+      "pct": 21.0
+    },
+    {
+      "feature": "Kilométrage",
+      "pct": 8.8
+    },
+    {
+      "feature": "Km_Par_An",
+      "pct": 6.6
+    },
+    {
+      "feature": "Marque",
+      "pct": 4.4
+    },
+    {
+      "feature": "Energie",
+      "pct": 3.8
+    },
+    {
+      "feature": "Age_Carre",
+      "pct": 3.6
     },
     {
       "feature": "Log_Kilometrage",
-      "pct": 0.5
+      "pct": 2.9
+    },
+    {
+      "feature": "Boite_Vitesse",
+      "pct": 0.8
+    },
+    {
+      "feature": "Puissance_Fiscale",
+      "pct": 0.0
+    },
+    {
+      "feature": "Segment_Vehicule",
+      "pct": 0.0
     }
   ],
-  "date_calcul": "2026-11-17T05:44:50"
+  "date_calcul": "2026-11-18T04:45:58"
 }
