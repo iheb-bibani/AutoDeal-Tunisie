@@ -1,42 +1,42 @@
 {
-  "started_at": "2026-11-26T04:45:10+00:00",
-  "finished_at": "2026-11-26T05:29:09+00:00",
+  "started_at": "2026-11-27T04:51:16+00:00",
+  "finished_at": "2026-11-27T05:33:11+00:00",
   "status": "success",
   "scrapers": {
     "tayara": {
       "script": "scrapers/scraper_tayara.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 1359.2,
-      "finished_at": "2026-11-26T05:07:49+00:00"
+      "duration_seconds": 1222.5,
+      "finished_at": "2026-11-27T05:11:38+00:00"
     },
     "automobile": {
       "script": "scrapers/scraper_automobile.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 1086.7,
-      "finished_at": "2026-11-26T05:25:58+00:00"
+      "duration_seconds": 1191.0,
+      "finished_at": "2026-11-27T05:31:31+00:00"
     },
     "automax": {
       "script": "scrapers/scraper_automax.py",
-      "status": "success",
-      "returncode": 0,
-      "duration_seconds": 54.3,
-      "finished_at": "2026-11-26T05:26:54+00:00"
+      "status": "failed",
+      "returncode": 1,
+      "duration_seconds": 1.6,
+      "finished_at": "2026-11-27T05:31:35+00:00"
     },
     "sayyarat": {
       "script": "scrapers/scraper_sayyarat.py",
-      "status": "success",
-      "returncode": 0,
-      "duration_seconds": 32.3,
-      "finished_at": "2026-11-26T05:27:28+00:00"
+      "status": "failed",
+      "returncode": 1,
+      "duration_seconds": 16.1,
+      "finished_at": "2026-11-27T05:31:53+00:00"
     },
     "autocentral": {
       "script": "scrapers/scraper_autocentral.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 4.7,
-      "finished_at": "2026-11-26T05:27:35+00:00"
+      "duration_seconds": 2.2,
+      "finished_at": "2026-11-27T05:31:57+00:00"
     }
   },
   "processing": {
@@ -44,52 +44,46 @@
       "script": "core/merging_files.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 1.0,
-      "finished_at": "2026-11-26T05:27:38+00:00"
+      "duration_seconds": 0.9,
+      "finished_at": "2026-11-27T05:32:00+00:00"
     },
     "core/nettoyer_base.py": {
       "script": "core/nettoyer_base.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 3.2,
-      "finished_at": "2026-11-26T05:27:41+00:00"
+      "duration_seconds": 2.5,
+      "finished_at": "2026-11-27T05:32:03+00:00"
     },
     "core/enrichir_base_avance.py": {
       "script": "core/enrichir_base_avance.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 0.7,
-      "finished_at": "2026-11-26T05:27:42+00:00"
+      "duration_seconds": 0.6,
+      "finished_at": "2026-11-27T05:32:03+00:00"
     },
     "core/modele_prediction.py": {
       "script": "core/modele_prediction.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 85.1,
-      "finished_at": "2026-11-26T05:29:07+00:00"
+      "duration_seconds": 66.7,
+      "finished_at": "2026-11-27T05:33:10+00:00"
     },
     "core/detect_deals.py": {
       "script": "core/detect_deals.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 0.7,
-      "finished_at": "2026-11-26T05:29:08+00:00"
+      "duration_seconds": 0.6,
+      "finished_at": "2026-11-27T05:33:11+00:00"
     },
     "core/suivi_annonces.py": {
       "script": "core/suivi_annonces.py",
       "status": "success",
       "returncode": 0,
-      "duration_seconds": 0.9,
-      "finished_at": "2026-11-26T05:29:09+00:00"
+      "duration_seconds": 0.8,
+      "finished_at": "2026-11-27T05:33:11+00:00"
     }
   },
   "catalogues": {
-    "sayyarat": {
-      "liens_vus": 49,
-      "complet": true,
-      "nouvelles": 0,
-      "pages": null
-    },
     "autocentral": {
       "liens_vus": 6,
       "complet": true,
@@ -97,22 +91,16 @@
       "pages": null
     },
     "automobile": {
-      "liens_vus": 1821,
+      "liens_vus": 1820,
       "complet": false,
-      "nouvelles": 40,
+      "nouvelles": 36,
       "pages": 160
     },
     "tayara": {
-      "liens_vus": 1755,
+      "liens_vus": 1752,
       "complet": true,
-      "nouvelles": 305,
+      "nouvelles": 307,
       "pages": 59
-    },
-    "automax": {
-      "liens_vus": 442,
-      "complet": true,
-      "nouvelles": 0,
-      "pages": 38
     }
   }
 }
